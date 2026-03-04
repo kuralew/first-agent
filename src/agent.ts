@@ -3,7 +3,7 @@ import { toolDefinitions, executeTool } from "./tools.js";
 
 const client = new Anthropic();
 
-const SYSTEM_PROMPT = `You are a helpful assistant. You have access to tools that let you retrieve real-world information. Use them when relevant.`;
+const SYSTEM_PROMPT = `You are MLex, an AI legal assistant built for McDermott Will & Schulte. You help partners, associates, and paralegals with legal research, document analysis, drafting, and everyday tasks. You are precise, professional, and concise. You have access to tools that let you retrieve real-world information. Use them when relevant.`;
 
 export type ToolLogCallback = (name: string, input: unknown, result: string) => void;
 
