@@ -4,7 +4,7 @@ import cors from "cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type Anthropic from "@anthropic-ai/sdk";
-import { runAgent } from "./agent.js";
+import { runAgent, runAgentStream } from "./agent.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +38,38 @@ app.post("/chat", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post("/chat/stream", async (req, res) => {
+  const { userMessage, history = [] } = req.body as {
+    userMessage: string;
+    history: Anthropic.MessageParam[];
+  };
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+  const messages: Anthropic.MessageParam[] = [
+    ...history,
+    { role: "user", content: userMessage },
+  ];
+
+  try {
+    await runAgentStream(
+      messages,
+      (text) => send({ type: "chunk", text }),
+      (name, input, result) => send({ type: "tool", name, input, result })
+    );
+    send({ type: "done", history: messages });
+  } catch (err) {
+    console.error(err);
+    send({ type: "error", error: String(err) });
+  } finally {
+    res.end();
   }
 });
 
