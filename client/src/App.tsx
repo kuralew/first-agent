@@ -37,6 +37,7 @@ export default function App() {
   const [history, setHistory] = useState<unknown[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [streaming, setStreaming] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -62,7 +63,7 @@ export default function App() {
 
     try {
       const body: ChatRequest = { userMessage: text, history };
-      const res = await fetch("http://localhost:3001/chat", {
+      const res = await fetch("http://localhost:3001/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -70,12 +71,60 @@ export default function App() {
 
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
 
-      const data: ChatResponse = await res.json();
-      setHistory(data.history);
-      setDisplayMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: data.reply, toolLogs: data.toolLogs },
-      ]);
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let started = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+
+        for (const part of parts) {
+          if (!part.startsWith("data: ")) continue;
+          const data = JSON.parse(part.slice(6));
+
+          if (data.type === "chunk") {
+            if (!started) {
+              started = true;
+              setLoading(false);
+              setStreaming(true);
+              setDisplayMessages((prev) => [
+                ...prev,
+                { role: "assistant", text: data.text, toolLogs: [] },
+              ]);
+            } else {
+              setDisplayMessages((prev) => {
+                const msgs = [...prev];
+                const last = msgs[msgs.length - 1];
+                return [...msgs.slice(0, -1), { ...last, text: last.text + data.text }];
+              });
+            }
+          } else if (data.type === "tool") {
+            setDisplayMessages((prev) => {
+              const msgs = [...prev];
+              const last = msgs[msgs.length - 1];
+              const toolLogs = [...(last.toolLogs ?? []), { name: data.name, input: data.input, result: data.result }];
+              return [...msgs.slice(0, -1), { ...last, toolLogs }];
+            });
+          } else if (data.type === "done") {
+            setHistory(data.history);
+          } else if (data.type === "error") {
+            throw new Error(data.error);
+          }
+        }
+      }
+
+      if (!started) {
+        setDisplayMessages((prev) => [
+          ...prev,
+          { role: "assistant", text: "(no response)", toolLogs: [] },
+        ]);
+      }
     } catch (err) {
       setDisplayMessages((prev) => [
         ...prev,
@@ -83,6 +132,7 @@ export default function App() {
       ]);
     } finally {
       setLoading(false);
+      setStreaming(false);
     }
   }
 
@@ -149,7 +199,12 @@ export default function App() {
                       </div>
                     </details>
                   )}
-                  <p className="assistant-text">{msg.text}</p>
+                  <p className="assistant-text">
+                    {msg.text}
+                    {streaming && i === displayMessages.length - 1 && (
+                      <span className="cursor" />
+                    )}
+                  </p>
                 </>
               ) : (
                 <div className="user-bubble">{msg.text}</div>
