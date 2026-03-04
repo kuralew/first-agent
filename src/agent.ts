@@ -5,8 +5,11 @@ const client = new Anthropic();
 
 const SYSTEM_PROMPT = `You are a helpful assistant. You have access to tools that let you retrieve real-world information. Use them when relevant.`;
 
+export type ToolLogCallback = (name: string, input: unknown, result: string) => void;
+
 export async function runAgent(
-  messages: Anthropic.MessageParam[]
+  messages: Anthropic.MessageParam[],
+  onToolLog?: ToolLogCallback
 ): Promise<string> {
   // Agentic loop — continues until Claude stops calling tools
   while (true) {
@@ -34,12 +37,16 @@ export async function runAgent(
       for (const block of response.content) {
         if (block.type !== "tool_use") continue;
 
-        console.log(`  [tool] ${block.name}(${JSON.stringify(block.input)})`);
         const result = executeTool(
           block.name,
           block.input as Record<string, unknown>
         );
-        console.log(`  [tool] → ${result}`);
+        if (onToolLog) {
+          onToolLog(block.name, block.input, result);
+        } else {
+          console.log(`  [tool] ${block.name}(${JSON.stringify(block.input)})`);
+          console.log(`  [tool] → ${result}`);
+        }
 
         toolResults.push({
           type: "tool_result",
