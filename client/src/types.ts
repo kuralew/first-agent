@@ -8,6 +8,8 @@ export interface DisplayMessage {
   role: "user" | "assistant";
   text: string;
   toolLogs?: ToolLog[];
+  pdfUrl?: string;
+  pdfName?: string;
 }
 
 export interface ChatRequest {

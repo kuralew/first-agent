@@ -1,7 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { toolDefinitions, executeTool } from "./tools.js";
 
-const client = new Anthropic();
+const client = new Anthropic({
+  defaultHeaders: { "anthropic-beta": "pdfs-2024-09-25" },
+});
 
 const SYSTEM_PROMPT = `You are MLex, an AI legal assistant built for McDermott Will & Schulte. You help partners, associates, and paralegals with legal research, document analysis, drafting, and everyday tasks. You are precise, professional, and concise. You have access to tools that let you retrieve real-world information. Use them when relevant.`;
 
