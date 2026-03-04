@@ -53,8 +53,8 @@ body {
 
 .header-model {
   font-size: 0.75rem;
-  color: #9A8F87;
-  background: #EDE8E3;
+  color: #1B3A6B;
+  background: #E8EDF5;
   padding: 0.15rem 0.5rem;
   border-radius: 99px;
   margin-left: 0.25rem;
@@ -92,7 +92,12 @@ body {
 .empty-state h2 {
   font-size: 1.4rem;
   font-weight: 500;
-  color: #3D3530;
+  color: #1B3A6B;
+}
+
+.empty-subtitle {
+  font-size: 0.85rem;
+  color: #6B7A96;
 }
 
 /* Message rows */
@@ -256,8 +261,8 @@ body {
   font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
   font-size: 0.75rem;
   font-weight: 600;
-  color: #CC785C;
-  background: #F9EDE8;
+  color: #1B3A6B;
+  background: #E8EDF5;
   padding: 0.1rem 0.4rem;
   border-radius: 0.3rem;
 }

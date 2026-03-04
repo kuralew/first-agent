@@ -1,15 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import type { DisplayMessage, ChatRequest, ChatResponse } from "./types.ts";
 
-function ClaudeAvatar() {
+function MlexAvatar() {
   return (
     <div className="avatar">
       <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="20" cy="20" r="20" fill="#CC785C" />
-        <path
-          d="M20 10 C14 10 10 14.5 10 20 C10 25.5 14 30 20 30 C23 30 25.5 28.8 27.3 26.8 L25.1 24.8 C23.8 26.2 22 27 20 27 C15.6 27 13 23.9 13 20 C13 16.1 15.6 13 20 13 C22 13 23.8 13.8 25.1 15.2 L27.3 13.2 C25.5 11.2 23 10 20 10Z"
-          fill="white"
-        />
+        <circle cx="20" cy="20" r="20" fill="#1B3A6B" />
+        <text x="20" y="25" textAnchor="middle" fill="white" fontSize="13" fontWeight="700" fontFamily="Inter, system-ui, sans-serif">ML</text>
       </svg>
     </div>
   );
@@ -23,7 +20,7 @@ function SendIcon({ disabled }: { disabled: boolean }) {
       xmlns="http://www.w3.org/2000/svg"
       className="send-icon"
     >
-      <circle cx="12" cy="12" r="12" fill={disabled ? "#D1CBC4" : "#1A1A1A"} />
+      <circle cx="12" cy="12" r="12" fill={disabled ? "#D1CBC4" : "#1B3A6B"} />
       <path
         d="M12 17V8M8 12L12 8L16 12"
         stroke="white"
@@ -104,12 +101,12 @@ export default function App() {
         <div className="header-inner">
           <span className="header-logo">
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="22" height="22">
-              <circle cx="12" cy="12" r="12" fill="#CC785C" />
-              <path d="M12 6C8.7 6 6 8.7 6 12C6 15.3 8.7 18 12 18C13.8 18 15.3 17.3 16.4 16.1L14.9 14.7C14.1 15.5 13.1 16 12 16C9.8 16 8 14.2 8 12C8 9.8 9.8 8 12 8C13.1 8 14.1 8.5 14.9 9.3L16.4 7.9C15.3 6.7 13.8 6 12 6Z" fill="white"/>
+              <circle cx="12" cy="12" r="12" fill="#1B3A6B" />
+              <text x="12" y="16" textAnchor="middle" fill="white" fontSize="7.5" fontWeight="700" fontFamily="Inter, system-ui, sans-serif">ML</text>
             </svg>
           </span>
-          <span className="header-title">Claude</span>
-          <span className="header-model">first-agent</span>
+          <span className="header-title">MLex</span>
+          <span className="header-model">McDermott Will &amp; Schulte</span>
         </div>
       </header>
 
@@ -118,17 +115,18 @@ export default function App() {
           <div className="empty-state">
             <div className="empty-logo">
               <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="40" cy="40" r="40" fill="#F0E8E2" />
-                <path d="M40 14C26.7 14 16 24.7 16 38C16 51.3 26.7 62 40 62C46.6 62 52.5 59.4 56.8 55.1L52.7 51.2C49.6 54.3 45.4 56.2 40.8 56.2C30.4 56.2 22 47.8 22 37.4C22 27 30.4 18.6 40.8 18.6C45.4 18.6 49.6 20.5 52.7 23.6L56.8 19.7C52.5 15.4 46.6 13 40 13L40 14Z" fill="#CC785C"/>
+                <circle cx="40" cy="40" r="40" fill="#E8EDF5" />
+                <text x="40" y="50" textAnchor="middle" fill="#1B3A6B" fontSize="22" fontWeight="700" fontFamily="Inter, system-ui, sans-serif">ML</text>
               </svg>
             </div>
             <h2>How can I help you today?</h2>
+            <p className="empty-subtitle">Your AI legal assistant by McDermott Will &amp; Schulte</p>
           </div>
         )}
 
         {displayMessages.map((msg, i) => (
           <div key={i} className={`message-row message-row-${msg.role}`}>
-            {msg.role === "assistant" && <ClaudeAvatar />}
+            {msg.role === "assistant" && <MlexAvatar />}
             <div className={`message-content message-content-${msg.role}`}>
               {msg.role === "assistant" ? (
                 <>
@@ -162,7 +160,7 @@ export default function App() {
 
         {loading && (
           <div className="message-row message-row-assistant">
-            <ClaudeAvatar />
+            <MlexAvatar />
             <div className="message-content message-content-assistant">
               <div className="typing">
                 <span className="dot" />
@@ -183,7 +181,7 @@ export default function App() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message Claude..."
+            placeholder="Message MLex..."
             rows={1}
             disabled={loading}
           />
