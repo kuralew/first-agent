@@ -126,8 +126,10 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollToRef = useRef<((h: IHighlight) => void) | null>(null);
   const previewPaneRef = useRef<HTMLDivElement>(null);
-  // Holds a citation that should be activated once PdfHighlighter finishes initializing.
   const pendingCitationRef = useRef<Citation | null>(null);
+  // Always-current pageDims for use inside async callbacks.
+  const pageDimsRef = useRef<PageDims>({});
+  useEffect(() => { pageDimsRef.current = pageDims; }, [pageDims]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -140,33 +142,67 @@ export default function App() {
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
   }, [input]);
 
-  // When the preview pane opens for the first time, PdfHighlighter ignores
-  // highlights that were already in props on its first mount — it only processes
-  // highlights that arrive as prop *changes* after it is initialized.
-  // Fix: keep activeCitation=null while the pane opens, poll until pdfjs has
-  // finished rendering the first page canvas (reliable "initialized" signal),
-  // then set activeCitation so it arrives as a prop change.
+  // ROOT CAUSE: React StrictMode double-invokes init(), causing the pdfjs viewer
+  // to stay wired to eventBus1 while PdfHighlighter's listeners move to eventBus2.
+  // textlayerrendered fires on eventBus1 → renderHighlightLayers() is never called.
+  // componentDidUpdate *does* call renderHighlightLayers() when highlights change,
+  // but findOrCreateHighlightLayer() needs textLayer to be non-null — which only
+  // happens after pdfjs renders the page (requires scrolling there first).
+  //
+  // FIX: on first open, defer activeCitation until:
+  //   1. pdfjs has initialised (page-1 canvas has height)
+  //   2. we scroll to the target page so pdfjs renders it
+  //   3. target page's .textLayer element exists in the DOM
+  // Then setting activeCitation triggers componentDidUpdate → renderHighlightLayers()
+  // → findOrCreateHighlightLayer() finds a valid textLayer → highlight renders.
   useEffect(() => {
     if (!previewPdf || !pendingCitationRef.current) return;
 
     const pending = pendingCitationRef.current;
     let cancelled = false;
-    let attempts = 0;
+    let initAttempts = 0;
 
-    const waitForCanvas = () => {
+    const waitForInit = () => {
       if (cancelled) return;
-      const firstPageEl = previewPaneRef.current?.querySelector('[data-page-number="1"]');
-      const canvas = firstPageEl?.querySelector("canvas") as HTMLCanvasElement | null;
+      const firstPage = previewPaneRef.current?.querySelector('[data-page-number="1"]');
+      const canvas = firstPage?.querySelector("canvas") as HTMLCanvasElement | null;
       if (canvas && canvas.offsetHeight > 0) {
-        pendingCitationRef.current = null;
-        setActiveCitation(pending);
-      } else if (attempts < 40) {
-        attempts++;
-        setTimeout(waitForCanvas, 100);
+        scrollThenWaitForTextLayer();
+      } else if (initAttempts < 40) {
+        initAttempts++;
+        setTimeout(waitForInit, 100);
       }
     };
 
-    setTimeout(waitForCanvas, 100);
+    const scrollThenWaitForTextLayer = () => {
+      if (cancelled) return;
+      const pdfViewer = previewPaneRef.current?.querySelector(".pdfViewer") as HTMLElement | null;
+      const pageEl = pdfViewer?.querySelector(`[data-page-number="${pending.page}"]`) as HTMLElement | null;
+      if (pdfViewer && pageEl) {
+        const dim = pageDimsRef.current[pending.page];
+        const scale = dim ? pageEl.offsetHeight / dim.h : 1;
+        const lineOffsetFromPageTop = dim ? (dim.h - pending.y2) * scale : 0;
+        (pdfViewer.parentElement as HTMLElement).scrollTo({
+          top: pageEl.offsetTop + lineOffsetFromPageTop - 80,
+          behavior: "smooth",
+        });
+      }
+      waitForTextLayer(0);
+    };
+
+    const waitForTextLayer = (attempts: number) => {
+      if (cancelled) return;
+      const targetPage = previewPaneRef.current?.querySelector(`[data-page-number="${pending.page}"]`);
+      const textLayer = targetPage?.querySelector(".textLayer") as HTMLElement | null;
+      if (textLayer && textLayer.children.length > 0) {
+        pendingCitationRef.current = null;
+        setActiveCitation(pending);
+      } else if (attempts < 40) {
+        setTimeout(() => waitForTextLayer(attempts + 1), 100);
+      }
+    };
+
+    setTimeout(waitForInit, 100);
     return () => { cancelled = true; };
   }, [previewPdf]);
 
