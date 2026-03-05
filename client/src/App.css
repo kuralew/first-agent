@@ -581,6 +581,11 @@ body {
   white-space: nowrap;
 }
 
+/* Override library's red scrolled-to highlight colour with yellow */
+[class*="_scrolledTo_"] [class*="_part_"] {
+  background: rgba(255, 212, 0, 0.55) !important;
+}
+
 .pdf-loading {
   display: flex;
   align-items: center;
