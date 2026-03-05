@@ -21,10 +21,6 @@ body {
   overflow: hidden;
 }
 
-.layout-split .app {
-  border-right: 1px solid rgba(0, 0, 0, 0.08);
-}
-
 .app {
   display: flex;
   flex-direction: column;
@@ -36,95 +32,74 @@ body {
 }
 
 .layout-split .app {
+  flex: 1;
   max-width: none;
   margin: 0;
+  border-right: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 /* ── Preview pane ────────────────────────────────── */
 
 .preview-pane {
-  width: 500px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  background: #F5F5F0;
-  border-left: 1px solid rgba(0, 0, 0, 0.08);
+  background: #3a3a3a;
+  overflow: hidden;
 }
 
 .preview-header {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  background: #fff;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 0.6rem 1rem;
+  background: #2a2a2a;
   flex-shrink: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
 .preview-title {
   flex: 1;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 500;
-  color: #1A1A1A;
+  color: #ccc;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.preview-nav {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8rem;
-  color: #555;
-}
-
-.preview-nav button {
-  background: none;
-  border: 1px solid #ddd;
-  border-radius: 0.3rem;
-  padding: 0.1rem 0.4rem;
-  cursor: pointer;
-  font-size: 1rem;
-  line-height: 1;
-  color: #333;
-}
-
-.preview-nav button:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
 .preview-close {
   background: none;
   border: none;
-  font-size: 1.2rem;
+  font-size: 1.3rem;
   cursor: pointer;
   color: #888;
   padding: 0 0.2rem;
   line-height: 1;
+  transition: color 0.15s;
 }
 
 .preview-close:hover {
-  color: #333;
+  color: #fff;
 }
 
 .preview-body {
   flex: 1;
-  overflow-y: auto;
-  display: flex;
-  justify-content: center;
-  padding: 1rem;
+  overflow: hidden;
+  position: relative;
 }
 
-.preview-body .react-pdf__Document {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+/* Make react-pdf-highlighter pages look like a real PDF viewer */
+.preview-body .pdfHighlighter {
+  background: #3a3a3a !important;
+  padding: 24px 0;
 }
 
-.preview-body .react-pdf__Page {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+.preview-body .page {
+  margin: 0 auto 20px auto !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+  background: white !important;
 }
 
 /* ── Header ──────────────────────────────────────── */
@@ -568,4 +543,49 @@ body {
 .attach-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* ── Citations ───────────────────────────────────── */
+
+.citation-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  background: #1B3A6B;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  vertical-align: super;
+  margin: 0 1px;
+  line-height: 1;
+  transition: background 0.15s, transform 0.1s;
+  flex-shrink: 0;
+}
+
+.citation-btn:hover {
+  background: #152e57;
+  transform: scale(1.15);
+}
+
+.highlight-popup {
+  background: #1B3A6B;
+  color: white;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.3rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.pdf-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  color: #6B7A96;
+  font-size: 0.85rem;
 }

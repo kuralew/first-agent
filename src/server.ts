@@ -9,7 +9,7 @@ import { runAgent, runAgentStream } from "./agent.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ limit: "10mb" }));
 app.use(
   cors({
     origin: /^http:\/\/localhost:\d+$/,
@@ -41,28 +41,11 @@ app.post("/chat", async (req, res) => {
   }
 });
 
-function sanitizeMessages(
-  messages: Anthropic.MessageParam[]
-): Anthropic.MessageParam[] {
-  return messages.map((msg) => {
-    if (!Array.isArray(msg.content)) return msg;
-    const hasDoc = (msg.content as any[]).some((b) => b.type === "document");
-    if (!hasDoc) return msg;
-    // Strip document blocks — keep only text, unwrap if single text block
-    const textBlocks = (msg.content as any[]).filter((b) => b.type === "text");
-    return {
-      ...msg,
-      content:
-        textBlocks.length === 1 ? textBlocks[0].text : textBlocks,
-    };
-  });
-}
-
 app.post("/chat/stream", async (req, res) => {
-  const { userMessage, history = [], pdf } = req.body as {
+  const { userMessage, history = [], doc } = req.body as {
     userMessage: string;
     history: Anthropic.MessageParam[];
-    pdf?: { base64: string; name: string };
+    doc?: { extractedText: string; name: string; pageDims: Record<number, { w: number; h: number }> };
   };
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -71,28 +54,22 @@ app.post("/chat/stream", async (req, res) => {
 
   const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
-  const userContent: unknown = pdf
-    ? [
-        {
-          type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: pdf.base64 },
-        },
-        { type: "text", text: userMessage || "Please analyze this document." },
-      ]
-    : userMessage;
-
-  const messages: Anthropic.MessageParam[] = [
-    ...history,
-    { role: "user", content: userContent as Anthropic.MessageParam["content"] },
-  ];
-
   try {
+    const userText = doc
+      ? `${userMessage || "Please analyze this document."}\n\nDocument: ${doc.name}\n\n${doc.extractedText}`
+      : userMessage;
+
+    const messages: Anthropic.MessageParam[] = [
+      ...history,
+      { role: "user", content: userText },
+    ];
+
     await runAgentStream(
       messages,
       (text) => send({ type: "chunk", text }),
       (name, input, result) => send({ type: "tool", name, input, result })
     );
-    send({ type: "done", history: sanitizeMessages(messages) });
+    send({ type: "done", history: messages, pageDims: doc?.pageDims ?? {} });
   } catch (err) {
     console.error(err);
     send({ type: "error", error: String(err) });
