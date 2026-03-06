@@ -17,18 +17,58 @@ const CITATION_RE = /\[p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/g;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Strip citation tags, return clean text + citation list. */
+/**
+ * Strip citation tags from raw text and return clean text + citation list.
+ *
+ * Consecutive tags on the same page with only whitespace between them are
+ * treated as a range and merged into a single citation whose bbox spans the
+ * full passage. Claude emits only the two boundary tags for multi-line facts.
+ */
 function parseCitations(raw: string): { text: string; citations: Citation[] } {
+  type TagMatch = { index: number; end: number; page: number; x1: number; y1: number; x2: number; y2: number };
+
+  const tags: TagMatch[] = [];
+  const re = new RegExp(CITATION_RE.source, 'g');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    tags.push({ index: m.index, end: m.index + m[0].length, page: +m[1], x1: +m[3], y1: +m[4], x2: +m[5], y2: +m[6] });
+  }
+
+  // Group consecutive same-page tags (only whitespace between them) into ranges.
+  const groups: TagMatch[][] = [];
+  for (const tag of tags) {
+    const last = groups[groups.length - 1];
+    const prev = last?.[last.length - 1];
+    if (prev && prev.page === tag.page && /^\s*$/.test(raw.slice(prev.end, tag.index))) {
+      last.push(tag);
+    } else {
+      groups.push([tag]);
+    }
+  }
+
+  // Merge each group into one citation with a bbox spanning the full passage.
   const citations: Citation[] = [];
+  const replacements: { start: number; end: number; label: string }[] = [];
   let nextId = 1;
-  const text = raw.replace(CITATION_RE, (_match, page, _line, x1, y1, x2, y2) => {
-    const alreadyHave = citations.find(
-      (c) => c.page === +page && c.x1 === +x1 && c.y1 === +y1
-    );
-    if (alreadyHave) return `[${alreadyHave.id}]`;
-    citations.push({ id: nextId, page: +page, x1: +x1, y1: +y1, x2: +x2, y2: +y2, quote: "" });
-    return `[${nextId++}]`;
-  });
+
+  for (const group of groups) {
+    const page = group[0].page;
+    const x1 = Math.min(...group.map(t => t.x1));
+    const y1 = Math.min(...group.map(t => t.y1));
+    const x2 = Math.max(...group.map(t => t.x2));
+    const y2 = Math.max(...group.map(t => t.y2));
+    const existing = citations.find(c => c.page === page && c.x1 === x1 && c.y1 === y1);
+    const id = existing ? existing.id : nextId;
+    if (!existing) { citations.push({ id, page, x1, y1, x2, y2, quote: '' }); nextId++; }
+    replacements.push({ start: group[0].index, end: group[group.length - 1].end, label: '[' + id + ']' });
+  }
+
+  // Apply back-to-front so earlier indexes stay valid.
+  let text = raw;
+  for (const rep of [...replacements].reverse()) {
+    text = text.slice(0, rep.start) + rep.label + text.slice(rep.end);
+  }
+
   return { text, citations };
 }
 

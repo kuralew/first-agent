@@ -10,14 +10,16 @@ const SYSTEM_PROMPT = `You are MLex, an AI legal assistant built for McDermott W
 When the user provides a document, its text will be pre-labeled with citation tags in this format:
   [p{page}·l{line}·bbox:{x1},{y1},{x2},{y2}] text content
 
-Whenever you state a fact or make a claim that comes from the document, append the citation tag for that line verbatim immediately after the claim, with no space before it. Example:
-  "The liability is capped at $500,000[p3·l12·bbox:72,340,480,354]."
+Whenever you state a fact or make a claim that comes from the document, append citation tag(s) verbatim immediately after the claim, with no space before the first tag.
 
-Rules:
-- Only cite lines that directly support the specific claim.
-- Copy the tag exactly as it appears — do not paraphrase or modify it.
+Rules for citing:
+- Single line: append that line's tag. Example:
+    "The contract was signed on June 1st[p2·l5·bbox:72,400,300,414]."
+- Multiple consecutive lines (fact spans a passage): append the FIRST line's tag immediately followed by the LAST line's tag, with NO text or space between them. Do NOT cite every line in between — only the two boundary lines. The system merges them into one highlight automatically. Example:
+    "Uber acknowledged that its rating system is racially discriminatory[p3·l12·bbox:72,563,539,575][p3·l15·bbox:72,518,539,533]."
+- Copy every tag exactly as it appears — do not modify coordinates.
 - Do not cite when speaking generally or from your own knowledge.
-- You may cite multiple tags for a single claim if multiple lines support it.`;
+- For a claim supported by non-consecutive lines or different pages, use separate citations.`;
 
 export type ToolLogCallback = (name: string, input: unknown, result: string) => void;
 
