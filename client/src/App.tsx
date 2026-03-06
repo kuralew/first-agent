@@ -70,6 +70,11 @@ function parseCitations(raw: string): { text: string; citations: Citation[] } {
     text = text.slice(0, rep.start) + rep.label + text.slice(rep.end);
   }
 
+  // During streaming, Claude may have emitted the opening of a citation tag that
+  // hasn't been closed yet (e.g. "[p6·l29·bbox:48,293" with no closing "]").
+  // Strip any such trailing incomplete tag so it never renders as raw text.
+  text = text.replace(/\[p\d[^\]]*$/, "");
+
   return { text, citations };
 }
 
