@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   PdfLoader,
   PdfHighlighter,
@@ -111,7 +112,7 @@ function SendIcon({ disabled }: { disabled: boolean }) {
   );
 }
 
-/** Renders assistant text with inline citation superscripts as clickable buttons. */
+/** Renders assistant text with markdown formatting and inline citation buttons. */
 function AssistantText({
   text,
   citations,
@@ -125,26 +126,49 @@ function AssistantText({
   streaming: boolean;
   isLast: boolean;
 }) {
-  const parts = text.split(/(\[\d+\])/g);
-  return (
-    <p className="assistant-text">
-      {parts.map((part, i) => {
-        const match = part.match(/^\[(\d+)\]$/);
-        if (match) {
-          const id = +match[1];
-          const citation = citations.find((c) => c.id === id);
-          if (citation) {
-            return (
-              <button key={i} className="citation-btn" onClick={() => onCitationClick(citation)} title={`Jump to source (page ${citation.page})`}>
-                {id}
-              </button>
-            );
-          }
+  const renderInline = (str: string) => {
+    const parts = str.split(/(\[\d+\])/g);
+    return parts.map((part, i) => {
+      const match = part.match(/^\[(\d+)\]$/);
+      if (match) {
+        const id = +match[1];
+        const citation = citations.find((c) => c.id === id);
+        if (citation) {
+          return (
+            <button key={i} className="citation-btn" onClick={() => onCitationClick(citation)} title={`Jump to source (page ${citation.page})`}>
+              {id}
+            </button>
+          );
         }
-        return <span key={i}>{part}</span>;
-      })}
+      }
+      return <span key={i}>{part}</span>;
+    });
+  };
+
+  const injectCitations = (children: React.ReactNode): React.ReactNode => {
+    if (Array.isArray(children)) {
+      return children.flatMap((child) =>
+        typeof child === "string" ? renderInline(child) : [child]
+      );
+    }
+    if (typeof children === "string") return renderInline(children);
+    return children;
+  };
+
+  return (
+    <div className="assistant-text">
+      <ReactMarkdown
+        components={{
+          p: ({ children }) => <p>{injectCitations(children)}</p>,
+          li: ({ children }) => <li>{injectCitations(children)}</li>,
+          td: ({ children }) => <td>{injectCitations(children)}</td>,
+          th: ({ children }) => <th>{injectCitations(children)}</th>,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
       {streaming && isLast && <span className="cursor" />}
-    </p>
+    </div>
   );
 }
 
@@ -355,7 +379,8 @@ export default function App() {
 
         for (const part of parts) {
           if (!part.startsWith("data: ")) continue;
-          const data = JSON.parse(part.slice(6));
+          let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; pageDims?: PageDims; error?: string };
+          try { data = JSON.parse(part.slice(6)); } catch { continue; }
 
           if (data.type === "chunk") {
             rawAccum += data.text;
@@ -380,11 +405,11 @@ export default function App() {
             setDisplayMessages((prev) => {
               const msgs = [...prev];
               const last = msgs[msgs.length - 1];
-              const toolLogs = [...(last.toolLogs ?? []), { name: data.name, input: data.input, result: data.result }];
+              const toolLogs = [...(last.toolLogs ?? []), { name: data.name ?? "", input: data.input, result: data.result ?? "" }];
               return [...msgs.slice(0, -1), { ...last, toolLogs }];
             });
           } else if (data.type === "done") {
-            setHistory(data.history);
+            if (data.history) setHistory(data.history);
             if (data.pageDims) setPageDims(data.pageDims);
           } else if (data.type === "error") {
             throw new Error(data.error);

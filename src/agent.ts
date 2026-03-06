@@ -17,6 +17,7 @@ Rules for citing:
     "The contract was signed on June 1st[p2·l5·bbox:72,400,300,414]."
 - Multiple consecutive lines (fact spans a passage): append the FIRST line's tag immediately followed by the LAST line's tag, with NO text or space between them. Do NOT cite every line in between — only the two boundary lines. The system merges them into one highlight automatically. Example:
     "Uber acknowledged that its rating system is racially discriminatory[p3·l12·bbox:72,563,539,575][p3·l15·bbox:72,518,539,533]."
+- Always place citation tag(s) at the END of the complete sentence or clause they support — never mid-sentence.
 - Copy every tag exactly as it appears — do not modify coordinates.
 - Do not cite when speaking generally or from your own knowledge.
 - For a claim supported by non-consecutive lines or different pages, use separate citations.`;
