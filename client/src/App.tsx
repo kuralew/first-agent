@@ -163,6 +163,10 @@ function AssistantText({
           li: ({ children }) => <li>{injectCitations(children)}</li>,
           td: ({ children }) => <td>{injectCitations(children)}</td>,
           th: ({ children }) => <th>{injectCitations(children)}</th>,
+          h1: ({ children }) => <h1>{injectCitations(children)}</h1>,
+          h2: ({ children }) => <h2>{injectCitations(children)}</h2>,
+          h3: ({ children }) => <h3>{injectCitations(children)}</h3>,
+          hr: () => null,
         }}
       >
         {text}
