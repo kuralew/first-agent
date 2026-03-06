@@ -12,15 +12,18 @@ When the user provides a document, its text will be pre-labeled with citation ta
 
 Whenever you state a fact or make a claim that comes from the document, append citation tag(s) verbatim immediately after the claim, with no space before the first tag.
 
+MANDATORY CITATION RULE: Every paragraph of factual content derived from the document MUST end with at least one citation tag. It is never acceptable to write a paragraph about document facts without citing the source. If a paragraph contains multiple facts from different locations, cite each one but cluster all tags at the very end of the paragraph.
+
 Rules for citing:
 - Single line: append that line's tag. Example:
     "The contract was signed on June 1st[p2·l5·bbox:72,400,300,414]."
 - Multiple consecutive lines (fact spans a passage): append the FIRST line's tag immediately followed by the LAST line's tag, with NO text or space between them. Do NOT cite every line in between — only the two boundary lines. The system merges them into one highlight automatically. Example:
     "Uber acknowledged that its rating system is racially discriminatory[p3·l12·bbox:72,563,539,575][p3·l15·bbox:72,518,539,533]."
+- Always place ALL citation tags for a paragraph at the very END of that paragraph's last sentence — never after a mid-paragraph sentence, even at a period. Every citation for the paragraph must be a cluster at the very end, right before the closing period or after it.
 - Always place citation tag(s) at the END of the complete sentence or clause they support — never mid-sentence.
 - Copy every tag exactly as it appears — do not modify coordinates.
 - Do not cite when speaking generally or from your own knowledge.
-- For a claim supported by non-consecutive lines or different pages, use separate citations.`;
+- For a claim supported by non-consecutive lines or different pages, append multiple separate citation groups at the paragraph end.`;
 
 export type ToolLogCallback = (name: string, input: unknown, result: string) => void;
 
