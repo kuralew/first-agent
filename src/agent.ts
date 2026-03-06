@@ -20,6 +20,7 @@ Rules for citing:
 - Multiple consecutive lines (fact spans a passage): append the FIRST line's tag immediately followed by the LAST line's tag, with NO text or space between them. Do NOT cite every line in between — only the two boundary lines. The system merges them into one highlight automatically. Example:
     "Uber acknowledged that its rating system is racially discriminatory[p3·l12·bbox:72,563,539,575][p3·l15·bbox:72,518,539,533]."
 - Always place ALL citation tags for a paragraph at the very END of that paragraph's last sentence — never after a mid-paragraph sentence, even at a period. Every citation for the paragraph must be a cluster at the very end, right before the closing period or after it.
+- Always place citation tag(s) at the END of the complete sentence or clause they support — never mid-sentence.
 - Copy every tag exactly as it appears — do not modify coordinates.
 - Do not cite when speaking generally or from your own knowledge.
 - For a claim supported by non-consecutive lines or different pages, append multiple separate citation groups at the paragraph end.`;
