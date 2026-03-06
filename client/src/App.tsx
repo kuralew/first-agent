@@ -460,7 +460,7 @@ export default function App() {
   return (
     <div className={`layout ${previewPdf ? "layout-split" : ""}`}>
       {/* ── Chat pane ── */}
-      <div className="app">
+      <div className={`app${previewPdf ? " app-split" : ""}`}>
         <header className="header">
           <div className="header-inner">
             <span className="header-logo">
@@ -531,26 +531,36 @@ export default function App() {
                       />
                     </>
                   ) : (
-                    <div className="user-bubble">
+                    <div className="user-message-stack">
                       {msg.pdfName && (
-                        <div className="pdf-chip pdf-chip-message">
-                          <span className="pdf-chip-icon">📄</span>
-                          <span className="pdf-chip-name">{msg.pdfName}</span>
+                        <div className="user-attachment-card">
+                          <div className="user-attachment-icon">
+                            <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                              <polyline points="14 2 14 8 20 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                              <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                              <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                            </svg>
+                          </div>
+                          <div className="user-attachment-info">
+                            <span className="user-attachment-name">{msg.pdfName}</span>
+                            <span className="user-attachment-meta">PDF Document</span>
+                          </div>
                           {msg.pdfUrl && (
                             <button
-                              className="pdf-preview-btn"
+                              className="user-attachment-view"
                               onClick={() => {
                                 setActiveCitation(null);
                                 setPreviewPdf({ url: msg.pdfUrl!, name: msg.pdfName! });
                               }}
                             >
-                              Preview
+                              View
                             </button>
                           )}
                         </div>
                       )}
                       {msg.text && msg.text !== `Analyze: ${msg.pdfName}` && (
-                        <span>{msg.text}</span>
+                        <div className="user-bubble-text">{msg.text}</div>
                       )}
                     </div>
                   )}
