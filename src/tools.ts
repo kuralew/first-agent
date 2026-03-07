@@ -73,6 +73,37 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ["document_type", "parties", "facts"],
     },
   },
+  {
+    name: "draft_document",
+    description:
+      "Call this after extract_key_facts to produce a draft legal document appropriate for the document type analyzed. " +
+      "Choose the draft type based on what was uploaded: " +
+      "complaint → draft a formal Response/Answer; " +
+      "contract → draft an Obligations & Risk Summary memo; " +
+      "consent order → draft a Compliance Action Plan; " +
+      "deposition → draft a Key Testimony Summary; " +
+      "regulatory filing → draft a Response memo; " +
+      "multiple related documents → draft a Synthesis memo. " +
+      "Write a complete, professional, ready-to-edit draft. Use markdown formatting (## headers, bullet lists).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        draft_type: {
+          type: "string",
+          description: "e.g. 'Response to Complaint', 'Compliance Action Plan', 'Obligations & Risk Summary'",
+        },
+        title: {
+          type: "string",
+          description: "Full title of the draft document",
+        },
+        content: {
+          type: "string",
+          description: "Complete markdown content of the draft — headers, paragraphs, lists. Write a full, professional document.",
+        },
+      },
+      required: ["draft_type", "title", "content"],
+    },
+  },
 ];
 
 export function executeTool(
@@ -81,9 +112,10 @@ export function executeTool(
 ): string {
   switch (name) {
     case "extract_key_facts":
-      // Echo the structured data back as confirmation.
-      // The real value is the client capturing `input` from the tool event.
       return `Extracted facts recorded: ${(input.facts as unknown[])?.length ?? 0} facts, ${(input.parties as unknown[])?.length ?? 0} parties.`;
+
+    case "draft_document":
+      return `Draft recorded: "${input.title}" (${input.draft_type}).`;
 
     default:
       return `Unknown tool: ${name}`;

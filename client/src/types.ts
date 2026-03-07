@@ -58,6 +58,12 @@ export interface ExtractedFacts {
   amounts?: KeyAmount[];
 }
 
+export interface DocumentDraft {
+  draft_type: string;
+  title: string;
+  content: string;
+}
+
 export interface DisplayMessage {
   role: "user" | "assistant";
   text: string;
@@ -65,4 +71,5 @@ export interface DisplayMessage {
   docs?: DocInfo[];
   citations?: Citation[];
   extractedFacts?: ExtractedFacts;
+  draft?: DocumentDraft;
 }
