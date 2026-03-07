@@ -7,40 +7,54 @@ import {
   Popup,
 } from "react-pdf-highlighter";
 import type { IHighlight, ScaledPosition } from "react-pdf-highlighter";
-import type { DisplayMessage, Citation, PageDims } from "./types.ts";
+import type { DisplayMessage, Citation, DocInfo } from "./types.ts";
 import { extractTextWithBBoxes } from "./pdfExtract.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const WORKER_SRC = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
 
-const CITATION_RE = /\[p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/g;
+// Matches [d{docId}·p{page}·l{line}·bbox:{x1},{y1},{x2},{y2}]
+const CITATION_RE = /\[d(\d+)·p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/g;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
  * Strip citation tags from raw text and return clean text + citation list.
  *
- * Consecutive tags on the same page with only whitespace between them are
- * treated as a range and merged into a single citation whose bbox spans the
- * full passage. Claude emits only the two boundary tags for multi-line facts.
+ * Consecutive tags from the same doc+page with only whitespace between them
+ * are treated as a range and merged into one citation whose bbox spans the
+ * full passage.
  */
 function parseCitations(raw: string): { text: string; citations: Citation[] } {
-  type TagMatch = { index: number; end: number; page: number; x1: number; y1: number; x2: number; y2: number };
+  type TagMatch = {
+    index: number; end: number;
+    docId: number; page: number;
+    x1: number; y1: number; x2: number; y2: number;
+  };
 
   const tags: TagMatch[] = [];
-  const re = new RegExp(CITATION_RE.source, 'g');
+  const re = new RegExp(CITATION_RE.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw)) !== null) {
-    tags.push({ index: m.index, end: m.index + m[0].length, page: +m[1], x1: +m[3], y1: +m[4], x2: +m[5], y2: +m[6] });
+    tags.push({
+      index: m.index, end: m.index + m[0].length,
+      docId: +m[1], page: +m[2],
+      x1: +m[4], y1: +m[5], x2: +m[6], y2: +m[7],
+    });
   }
 
-  // Group consecutive same-page tags (only whitespace between them) into ranges.
+  // Group consecutive same-doc+page tags (only whitespace between) into ranges.
   const groups: TagMatch[][] = [];
   for (const tag of tags) {
     const last = groups[groups.length - 1];
     const prev = last?.[last.length - 1];
-    if (prev && prev.page === tag.page && /^\s*$/.test(raw.slice(prev.end, tag.index))) {
+    if (
+      prev &&
+      prev.docId === tag.docId &&
+      prev.page === tag.page &&
+      /^\s*$/.test(raw.slice(prev.end, tag.index))
+    ) {
       last.push(tag);
     } else {
       groups.push([tag]);
@@ -53,15 +67,25 @@ function parseCitations(raw: string): { text: string; citations: Citation[] } {
   let nextId = 1;
 
   for (const group of groups) {
+    const docId = group[0].docId;
     const page = group[0].page;
-    const x1 = Math.min(...group.map(t => t.x1));
-    const y1 = Math.min(...group.map(t => t.y1));
-    const x2 = Math.max(...group.map(t => t.x2));
-    const y2 = Math.max(...group.map(t => t.y2));
-    const existing = citations.find(c => c.page === page && c.x1 === x1 && c.y1 === y1);
+    const x1 = Math.min(...group.map((t) => t.x1));
+    const y1 = Math.min(...group.map((t) => t.y1));
+    const x2 = Math.max(...group.map((t) => t.x2));
+    const y2 = Math.max(...group.map((t) => t.y2));
+    const existing = citations.find(
+      (c) => c.docId === docId && c.page === page && c.x1 === x1 && c.y1 === y1
+    );
     const id = existing ? existing.id : nextId;
-    if (!existing) { citations.push({ id, page, x1, y1, x2, y2, quote: '' }); nextId++; }
-    replacements.push({ start: group[0].index, end: group[group.length - 1].end, label: '[' + id + ']' });
+    if (!existing) {
+      citations.push({ id, docId, page, x1, y1, x2, y2, quote: "" });
+      nextId++;
+    }
+    replacements.push({
+      start: group[0].index,
+      end: group[group.length - 1].end,
+      label: "[" + id + "]",
+    });
   }
 
   // Apply back-to-front so earlier indexes stay valid.
@@ -70,18 +94,20 @@ function parseCitations(raw: string): { text: string; citations: Citation[] } {
     text = text.slice(0, rep.start) + rep.label + text.slice(rep.end);
   }
 
-  // During streaming, Claude may have emitted the opening of a citation tag that
-  // hasn't been closed yet (e.g. "[p6·l29·bbox:48,293" with no closing "]").
-  // Strip any such trailing incomplete tag so it never renders as raw text.
-  text = text.replace(/\[p\d[^\]]*$/, "");
+  // Strip trailing incomplete citation tag that may appear during streaming.
+  text = text.replace(/\[d?\d[^\]]*$/, "");
 
   return { text, citations };
 }
 
 /** Convert a Citation to an IHighlight for react-pdf-highlighter. */
-function citationToHighlight(c: Citation, dims: PageDims): IHighlight {
-  const dim = dims[c.page] ?? { w: 612, h: 792 };
-  const rect = { x1: c.x1, y1: c.y1, x2: c.x2, y2: c.y2, width: dim.w, height: dim.h, pageNumber: c.page };
+function citationToHighlight(c: Citation, docs: DocInfo[]): IHighlight {
+  const doc = docs.find((d) => d.id === c.docId);
+  const dim = doc?.pageDims[c.page] ?? { w: 612, h: 792 };
+  const rect = {
+    x1: c.x1, y1: c.y1, x2: c.x2, y2: c.y2,
+    width: dim.w, height: dim.h, pageNumber: c.page,
+  };
   return {
     id: String(c.id),
     content: { text: c.quote || `Citation ${c.id}` },
@@ -140,7 +166,12 @@ function AssistantText({
         const citation = citations.find((c) => c.id === id);
         if (citation) {
           return (
-            <button key={i} className="citation-btn" onClick={() => onCitationClick(citation)} title={`Jump to source (page ${citation.page})`}>
+            <button
+              key={i}
+              className="citation-btn"
+              onClick={() => onCitationClick(citation)}
+              title={`Jump to source — Doc ${citation.docId}, page ${citation.page}`}
+            >
               {id}
             </button>
           );
@@ -189,13 +220,21 @@ export default function App() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
-  const [pendingPdf, setPendingPdf] = useState<{ file: File; name: string; url: string } | null>(null);
+
+  // Docs staged in the input area, not yet sent.
+  const [pendingDocs, setPendingDocs] = useState<
+    Array<{ file: File; name: string; url: string }>
+  >([]);
+
+  // All documents seen in this conversation, keyed by stable docId.
+  const [sessionDocs, setSessionDocs] = useState<DocInfo[]>([]);
+  // Monotonically increasing counter for assigning docIds.
+  const [nextDocId, setNextDocId] = useState(1);
+
   const [previewPdf, setPreviewPdf] = useState<{ url: string; name: string } | null>(null);
-  const [pageDims, setPageDims] = useState<PageDims>({});
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
-  // Bumped after a scroll when the target page's textLayer wasn't ready yet.
-  // Incrementing this forces a parent re-render → new `highlights` array reference
-  // → PdfHighlighter componentDidUpdate → renderHighlightLayers() with live textLayer.
+  // Bumped after scroll when textLayer wasn't ready; forces re-render →
+  // new highlights reference → PdfHighlighter.componentDidUpdate → renderHighlightLayers().
   const [highlightKey, setHighlightKey] = useState(0);
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -204,9 +243,9 @@ export default function App() {
   const scrollToRef = useRef<((h: IHighlight) => void) | null>(null);
   const previewPaneRef = useRef<HTMLDivElement>(null);
   const pendingCitationRef = useRef<Citation | null>(null);
-  // Always-current pageDims for use inside async callbacks.
-  const pageDimsRef = useRef<PageDims>({});
-  useEffect(() => { pageDimsRef.current = pageDims; }, [pageDims]);
+  // Always-current sessionDocs for use inside async callbacks.
+  const sessionDocsRef = useRef<DocInfo[]>([]);
+  useEffect(() => { sessionDocsRef.current = sessionDocs; }, [sessionDocs]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -219,19 +258,11 @@ export default function App() {
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
   }, [input]);
 
-  // ROOT CAUSE: React StrictMode double-invokes init(), causing the pdfjs viewer
-  // to stay wired to eventBus1 while PdfHighlighter's listeners move to eventBus2.
-  // textlayerrendered fires on eventBus1 → renderHighlightLayers() is never called.
-  // componentDidUpdate *does* call renderHighlightLayers() when highlights change,
-  // but findOrCreateHighlightLayer() needs textLayer to be non-null — which only
-  // happens after pdfjs renders the page (requires scrolling there first).
-  //
-  // FIX: on first open, defer activeCitation until:
-  //   1. pdfjs has initialised (page-1 canvas has height)
-  //   2. we scroll to the target page so pdfjs renders it
-  //   3. target page's .textLayer element exists in the DOM
-  // Then setting activeCitation triggers componentDidUpdate → renderHighlightLayers()
-  // → findOrCreateHighlightLayer() finds a valid textLayer → highlight renders.
+  // When the preview pane first opens (previewPdf changes), wait for pdfjs to
+  // initialise, scroll to the pending citation's page, then wait for the
+  // textLayer to render before setting activeCitation. This avoids the
+  // StrictMode double-init bug where renderHighlightLayers() runs before
+  // the textLayer exists.
   useEffect(() => {
     if (!previewPdf || !pendingCitationRef.current) return;
 
@@ -254,9 +285,12 @@ export default function App() {
     const scrollThenWaitForTextLayer = () => {
       if (cancelled) return;
       const pdfViewer = previewPaneRef.current?.querySelector(".pdfViewer") as HTMLElement | null;
-      const pageEl = pdfViewer?.querySelector(`[data-page-number="${pending.page}"]`) as HTMLElement | null;
+      const pageEl = pdfViewer?.querySelector(
+        `[data-page-number="${pending.page}"]`
+      ) as HTMLElement | null;
       if (pdfViewer && pageEl) {
-        const dim = pageDimsRef.current[pending.page];
+        const dims = sessionDocsRef.current.find((d) => d.id === pending.docId)?.pageDims ?? {};
+        const dim = dims[pending.page];
         const scale = dim ? pageEl.offsetHeight / dim.h : 1;
         const lineOffsetFromPageTop = dim ? (dim.h - pending.y2) * scale : 0;
         (pdfViewer.parentElement as HTMLElement).scrollTo({
@@ -269,7 +303,9 @@ export default function App() {
 
     const waitForTextLayer = (attempts: number) => {
       if (cancelled) return;
-      const targetPage = previewPaneRef.current?.querySelector(`[data-page-number="${pending.page}"]`);
+      const targetPage = previewPaneRef.current?.querySelector(
+        `[data-page-number="${pending.page}"]`
+      );
       const textLayer = targetPage?.querySelector(".textLayer") as HTMLElement | null;
       if (textLayer && textLayer.children.length > 0) {
         pendingCitationRef.current = null;
@@ -283,11 +319,10 @@ export default function App() {
     return () => { cancelled = true; };
   }, [previewPdf]);
 
-  // Scroll to the cited line whenever activeCitation changes.
-  // After scrolling, if the target page wasn't rendered yet (textLayer absent),
-  // poll until it appears then bump highlightKey. That forces a parent re-render
-  // → new `highlights` array reference → PdfHighlighter componentDidUpdate
-  // → renderHighlightLayers() — this time with a live textLayer → highlight renders.
+  // Scroll to cited line whenever activeCitation changes. If the target page's
+  // textLayer isn't in the DOM yet (off-screen), poll until it appears then
+  // bump highlightKey to force a re-render → new highlights reference →
+  // PdfHighlighter.componentDidUpdate → renderHighlightLayers() with live textLayer.
   useEffect(() => {
     if (!activeCitation || !previewPdf) return;
 
@@ -297,10 +332,13 @@ export default function App() {
     const tryScroll = () => {
       if (cancelled) return;
       const pdfViewer = previewPaneRef.current?.querySelector(".pdfViewer") as HTMLElement | null;
-      const pageEl = pdfViewer?.querySelector(`[data-page-number="${activeCitation.page}"]`) as HTMLElement | null;
+      const pageEl = pdfViewer?.querySelector(
+        `[data-page-number="${activeCitation.page}"]`
+      ) as HTMLElement | null;
 
       if (pdfViewer && pageEl) {
-        const dim = pageDims[activeCitation.page];
+        const dims = sessionDocs.find((d) => d.id === activeCitation.docId)?.pageDims ?? {};
+        const dim = dims[activeCitation.page];
         const scale = dim ? pageEl.offsetHeight / dim.h : 1;
         const lineOffsetFromPageTop = dim ? (dim.h - activeCitation.y2) * scale : 0;
         (pdfViewer.parentElement as HTMLElement).scrollTo({
@@ -308,12 +346,9 @@ export default function App() {
           behavior: "smooth",
         });
         if (scrollToRef.current) {
-          try { scrollToRef.current(citationToHighlight(activeCitation, pageDims)); } catch (_) {}
+          try { scrollToRef.current(citationToHighlight(activeCitation, sessionDocs)); } catch (_) {}
         }
 
-        // If the page's textLayer isn't in the DOM yet (it was off-screen),
-        // renderHighlightLayers() returned null above. Poll until it appears,
-        // then nudge highlightKey to re-trigger renderHighlightLayers().
         const page = activeCitation.page;
         const targetPage = previewPaneRef.current?.querySelector(`[data-page-number="${page}"]`);
         const textLayer = targetPage?.querySelector(".textLayer") as HTMLElement | null;
@@ -323,7 +358,7 @@ export default function App() {
             const tp = previewPaneRef.current?.querySelector(`[data-page-number="${page}"]`);
             const tl = tp?.querySelector(".textLayer") as HTMLElement | null;
             if (tl && tl.children.length > 0) {
-              setHighlightKey(k => k + 1);
+              setHighlightKey((k) => k + 1);
             } else if (retries < 30) {
               setTimeout(() => waitForLayer(retries + 1), 100);
             }
@@ -341,61 +376,87 @@ export default function App() {
   }, [activeCitation, previewPdf]);
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const url = URL.createObjectURL(file);
-    setPendingPdf({ file, name: file.name, url });
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    const newDocs = files.map((file) => ({
+      file,
+      name: file.name,
+      url: URL.createObjectURL(file),
+    }));
+    setPendingDocs((prev) => [...prev, ...newDocs]);
     e.target.value = "";
   }
 
-  function removePendingPdf() {
-    if (pendingPdf) URL.revokeObjectURL(pendingPdf.url);
-    setPendingPdf(null);
+  function removePendingDoc(index: number) {
+    setPendingDocs((prev) => {
+      URL.revokeObjectURL(prev[index].url);
+      return prev.filter((_, i) => i !== index);
+    });
   }
 
-  function handleCitationClick(citation: Citation, pdfUrl: string, pdfName: string) {
-    if (!previewPdf || previewPdf.url !== pdfUrl) {
-      // Pane is opening fresh. Defer activeCitation until PdfHighlighter is ready.
+  function handleCitationClick(citation: Citation) {
+    const doc = sessionDocs.find((d) => d.id === citation.docId);
+    if (!doc) return;
+
+    if (!previewPdf || previewPdf.url !== doc.url) {
+      // Pane is opening or switching to a different doc.
+      // Defer activeCitation until PdfHighlighter is initialised for the new doc.
       pendingCitationRef.current = citation;
       setActiveCitation(null);
-      setPreviewPdf({ url: pdfUrl, name: pdfName });
+      setPreviewPdf({ url: doc.url, name: doc.name });
     } else {
-      // Pane already open — set directly, PdfHighlighter is already initialized.
+      // Same doc already open — set directly.
       setActiveCitation(citation);
     }
   }
 
   async function send() {
     const text = input.trim();
-    if ((!text && !pendingPdf) || loading) return;
+    if ((!text && pendingDocs.length === 0) || loading) return;
 
-    const pdfSnapshot = pendingPdf;
+    const docsToSend = [...pendingDocs];
     setInput("");
-    setPendingPdf(null);
+    setPendingDocs([]);
 
-    setDisplayMessages((prev) => [
-      ...prev,
-      {
-        role: "user",
-        text: text || `Analyze: ${pdfSnapshot?.name}`,
-        pdfUrl: pdfSnapshot?.url,
-        pdfName: pdfSnapshot?.name,
-      },
-    ]);
     setLoading(true);
 
     try {
-      let docPayload: { extractedText: string; name: string; pageDims: PageDims } | undefined;
-      if (pdfSnapshot) {
-        const { text: extractedText, pageDims: dims } = await extractTextWithBBoxes(pdfSnapshot.file);
-        setPageDims(dims);
-        docPayload = { extractedText, name: pdfSnapshot.name, pageDims: dims };
+      // Extract text for each pending doc, assign stable docIds, prefix tags.
+      let docId = nextDocId;
+      const newDocs: DocInfo[] = [];
+      let combinedDocText = "";
+
+      for (const pending of docsToSend) {
+        const { text: rawText, pageDims } = await extractTextWithBBoxes(pending.file);
+        // Prefix each citation tag with the document ID: [p → [d{N}·p
+        const prefixedText = rawText.replace(/^\[p/gm, `[d${docId}\u00B7p`);
+        newDocs.push({ id: docId, name: pending.name, url: pending.url, pageDims });
+        combinedDocText += `=== Document ${docId}: ${pending.name} ===\n${prefixedText.trim()}\n\n`;
+        docId++;
       }
+
+      if (newDocs.length > 0) {
+        setSessionDocs((prev) => [...prev, ...newDocs]);
+        setNextDocId(docId);
+      }
+
+      setDisplayMessages((prev) => [
+        ...prev,
+        {
+          role: "user",
+          text: text || `Analyze: ${docsToSend.map((d) => d.name).join(", ")}`,
+          docs: newDocs,
+        },
+      ]);
 
       const res = await fetch("http://localhost:3001/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userMessage: text, history, doc: docPayload }),
+        body: JSON.stringify({
+          userMessage: text,
+          history,
+          docText: combinedDocText || undefined,
+        }),
       });
 
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -416,7 +477,15 @@ export default function App() {
 
         for (const part of parts) {
           if (!part.startsWith("data: ")) continue;
-          let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; pageDims?: PageDims; error?: string };
+          let data: {
+            type: string;
+            text?: string;
+            name?: string;
+            input?: unknown;
+            result?: string;
+            history?: unknown[];
+            error?: string;
+          };
           try { data = JSON.parse(part.slice(6)); } catch { continue; }
 
           if (data.type === "chunk") {
@@ -442,12 +511,14 @@ export default function App() {
             setDisplayMessages((prev) => {
               const msgs = [...prev];
               const last = msgs[msgs.length - 1];
-              const toolLogs = [...(last.toolLogs ?? []), { name: data.name ?? "", input: data.input, result: data.result ?? "" }];
+              const toolLogs = [
+                ...(last.toolLogs ?? []),
+                { name: data.name ?? "", input: data.input, result: data.result ?? "" },
+              ];
               return [...msgs.slice(0, -1), { ...last, toolLogs }];
             });
           } else if (data.type === "done") {
             if (data.history) setHistory(data.history);
-            if (data.pageDims) setPageDims(data.pageDims);
           } else if (data.type === "error") {
             throw new Error(data.error);
           }
@@ -478,13 +549,19 @@ export default function App() {
     }
   }
 
-  // Only the active citation is shown as a highlight — one at a time, no clutter.
-  const highlights: IHighlight[] = activeCitation && pageDims[activeCitation.page]
-    ? [citationToHighlight(activeCitation, pageDims)]
-    : [];
+  // Only the active citation is highlighted — one at a time, no clutter.
+  // highlightKey is read here so a state bump causes a re-render and a new
+  // array reference, which triggers PdfHighlighter.componentDidUpdate.
+  const activeDocDims = activeCitation
+    ? sessionDocs.find((d) => d.id === activeCitation.docId)?.pageDims
+    : null;
+  const highlights: IHighlight[] =
+    activeCitation && activeDocDims?.[activeCitation.page] && highlightKey >= 0
+      ? [citationToHighlight(activeCitation, sessionDocs)]
+      : [];
 
   const isEmpty = displayMessages.length === 0 && !loading;
-  const canSend = !loading && (!!input.trim() || !!pendingPdf);
+  const canSend = !loading && (!!input.trim() || pendingDocs.length > 0);
 
   const handleScrollRef = useCallback((scrollTo: (h: IHighlight) => void) => {
     scrollToRef.current = scrollTo;
@@ -521,86 +598,75 @@ export default function App() {
             </div>
           )}
 
-          {displayMessages.map((msg, i) => {
-            const prevUserMsg = msg.role === "assistant"
-              ? displayMessages.slice(0, i).reverse().find((m) => m.role === "user")
-              : null;
-
-            return (
-              <div key={i} className={`message-row message-row-${msg.role}`}>
-                {msg.role === "assistant" && <MlexAvatar />}
-                <div className={`message-content message-content-${msg.role}`}>
-                  {msg.role === "assistant" ? (
-                    <>
-                      {msg.toolLogs && msg.toolLogs.length > 0 && (
-                        <details className="tool-logs">
-                          <summary>
-                            <span className="tool-logs-icon">⚙</span>
-                            Used {msg.toolLogs.length} tool{msg.toolLogs.length !== 1 ? "s" : ""}
-                          </summary>
-                          <div className="tool-logs-body">
-                            {msg.toolLogs.map((log, j) => (
-                              <div key={j} className="tool-log">
-                                <div className="tool-log-header">
-                                  <span className="tool-name">{log.name}</span>
-                                </div>
-                                <pre className="tool-input">{JSON.stringify(log.input, null, 2)}</pre>
-                                <pre className="tool-result">{log.result}</pre>
+          {displayMessages.map((msg, i) => (
+            <div key={i} className={`message-row message-row-${msg.role}`}>
+              {msg.role === "assistant" && <MlexAvatar />}
+              <div className={`message-content message-content-${msg.role}`}>
+                {msg.role === "assistant" ? (
+                  <>
+                    {msg.toolLogs && msg.toolLogs.length > 0 && (
+                      <details className="tool-logs">
+                        <summary>
+                          <span className="tool-logs-icon">⚙</span>
+                          Used {msg.toolLogs.length} tool{msg.toolLogs.length !== 1 ? "s" : ""}
+                        </summary>
+                        <div className="tool-logs-body">
+                          {msg.toolLogs.map((log, j) => (
+                            <div key={j} className="tool-log">
+                              <div className="tool-log-header">
+                                <span className="tool-name">{log.name}</span>
                               </div>
-                            ))}
-                          </div>
-                        </details>
-                      )}
-                      <AssistantText
-                        text={msg.text}
-                        citations={msg.citations ?? []}
-                        onCitationClick={(c) => {
-                          const pdfUrl = prevUserMsg?.pdfUrl;
-                          const pdfName = prevUserMsg?.pdfName;
-                          if (pdfUrl && pdfName) handleCitationClick(c, pdfUrl, pdfName);
-                        }}
-                        streaming={streaming}
-                        isLast={i === displayMessages.length - 1}
-                      />
-                    </>
-                  ) : (
-                    <div className="user-message-stack">
-                      {msg.pdfName && (
-                        <div className="user-attachment-card">
-                          <div className="user-attachment-icon">
-                            <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
-                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                              <polyline points="14 2 14 8 20 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                              <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-                              <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-                            </svg>
-                          </div>
-                          <div className="user-attachment-info">
-                            <span className="user-attachment-name">{msg.pdfName}</span>
-                            <span className="user-attachment-meta">PDF Document</span>
-                          </div>
-                          {msg.pdfUrl && (
-                            <button
-                              className="user-attachment-view"
-                              onClick={() => {
-                                setActiveCitation(null);
-                                setPreviewPdf({ url: msg.pdfUrl!, name: msg.pdfName! });
-                              }}
-                            >
-                              View
-                            </button>
-                          )}
+                              <pre className="tool-input">{JSON.stringify(log.input, null, 2)}</pre>
+                              <pre className="tool-result">{log.result}</pre>
+                            </div>
+                          ))}
                         </div>
-                      )}
-                      {msg.text && msg.text !== `Analyze: ${msg.pdfName}` && (
+                      </details>
+                    )}
+                    <AssistantText
+                      text={msg.text}
+                      citations={msg.citations ?? []}
+                      onCitationClick={handleCitationClick}
+                      streaming={streaming}
+                      isLast={i === displayMessages.length - 1}
+                    />
+                  </>
+                ) : (
+                  <div className="user-message-stack">
+                    {msg.docs?.map((doc) => (
+                      <div key={doc.id} className="user-attachment-card">
+                        <div className="user-attachment-icon">
+                          <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                            <polyline points="14 2 14 8 20 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                            <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                            <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                          </svg>
+                        </div>
+                        <div className="user-attachment-info">
+                          <span className="user-attachment-name">{doc.name}</span>
+                          <span className="user-attachment-meta">PDF Document</span>
+                        </div>
+                        <button
+                          className="user-attachment-view"
+                          onClick={() => {
+                            setActiveCitation(null);
+                            setPreviewPdf({ url: doc.url, name: doc.name });
+                          }}
+                        >
+                          View
+                        </button>
+                      </div>
+                    ))}
+                    {msg.text &&
+                      msg.text !== `Analyze: ${msg.docs?.map((d) => d.name).join(", ")}` && (
                         <div className="user-bubble-text">{msg.text}</div>
                       )}
-                    </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
-            );
-          })}
+            </div>
+          ))}
 
           {loading && (
             <div className="message-row message-row-assistant">
@@ -619,11 +685,21 @@ export default function App() {
         </div>
 
         <div className="input-wrap">
-          {pendingPdf && (
-            <div className="pdf-chip">
-              <span className="pdf-chip-icon">📄</span>
-              <span className="pdf-chip-name">{pendingPdf.name}</span>
-              <button className="pdf-chip-remove" onClick={removePendingPdf} aria-label="Remove">×</button>
+          {pendingDocs.length > 0 && (
+            <div className="pdf-chips">
+              {pendingDocs.map((doc, i) => (
+                <div key={i} className="pdf-chip">
+                  <span className="pdf-chip-icon">📄</span>
+                  <span className="pdf-chip-name">{doc.name}</span>
+                  <button
+                    className="pdf-chip-remove"
+                    onClick={() => removePendingDoc(i)}
+                    aria-label="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
             </div>
           )}
           <div className="input-card">
@@ -631,6 +707,7 @@ export default function App() {
               ref={fileInputRef}
               type="file"
               accept=".pdf"
+              multiple
               style={{ display: "none" }}
               onChange={handleFileChange}
             />
@@ -650,7 +727,11 @@ export default function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={pendingPdf ? `Ask about ${pendingPdf.name}...` : "Message MLex..."}
+              placeholder={
+                pendingDocs.length > 0
+                  ? `Ask about ${pendingDocs.map((d) => d.name).join(", ")}...`
+                  : "Message MLex..."
+              }
               rows={1}
               disabled={loading}
             />

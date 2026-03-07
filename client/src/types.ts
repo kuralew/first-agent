@@ -6,6 +6,7 @@ export interface ToolLog {
 
 export interface Citation {
   id: number;
+  docId: number;
   page: number;
   x1: number;
   y1: number;
@@ -18,11 +19,17 @@ export interface PageDims {
   [page: number]: { w: number; h: number };
 }
 
+export interface DocInfo {
+  id: number;      // 1-indexed, stable across the conversation
+  name: string;
+  url: string;     // blob URL
+  pageDims: PageDims;
+}
+
 export interface DisplayMessage {
   role: "user" | "assistant";
   text: string;
   toolLogs?: ToolLog[];
-  pdfUrl?: string;
-  pdfName?: string;
+  docs?: DocInfo[];        // documents uploaded in this user message
   citations?: Citation[];
 }
