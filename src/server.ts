@@ -2,7 +2,9 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { watch } from "chokidar";
 import type Anthropic from "@anthropic-ai/sdk";
 import { runAgent, runAgentStream } from "./agent.js";
 
@@ -15,6 +17,41 @@ app.use(
     origin: /^http:\/\/localhost:\d+$/,
   })
 );
+
+// ── Intake inbox ─────────────────────────────────────────────────────────────
+
+const inboxDir = path.join(__dirname, "../../inbox");
+if (!fs.existsSync(inboxDir)) fs.mkdirSync(inboxDir, { recursive: true });
+
+// Serve inbox PDFs so the client can load them for extraction.
+app.use("/inbox", express.static(inboxDir));
+
+// SSE client registry — every open /events connection gets intake broadcasts.
+const sseClients = new Set<express.Response>();
+
+function broadcast(data: object) {
+  const msg = `data: ${JSON.stringify(data)}\n\n`;
+  for (const client of sseClients) client.write(msg);
+}
+
+// Persistent SSE endpoint — client connects once on mount and listens.
+app.get("/events", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
+  sseClients.add(res);
+  req.on("close", () => sseClients.delete(res));
+});
+
+// Watch inbox — when a PDF drops, broadcast to all connected clients.
+watch(inboxDir, { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 1200 } })
+  .on("add", (filePath) => {
+    if (!filePath.toLowerCase().endsWith(".pdf")) return;
+    const filename = path.basename(filePath);
+    console.log(`[intake] New document detected: ${filename}`);
+    broadcast({ type: "new_document", filename, url: `/inbox/${encodeURIComponent(filename)}` });
+  });
 
 app.post("/chat", async (req, res) => {
   const { userMessage, history = [] } = req.body as {
