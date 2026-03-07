@@ -193,6 +193,10 @@ export default function App() {
   const [previewPdf, setPreviewPdf] = useState<{ url: string; name: string } | null>(null);
   const [pageDims, setPageDims] = useState<PageDims>({});
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
+  // Bumped after a scroll when the target page's textLayer wasn't ready yet.
+  // Incrementing this forces a parent re-render → new `highlights` array reference
+  // → PdfHighlighter componentDidUpdate → renderHighlightLayers() with live textLayer.
+  const [highlightKey, setHighlightKey] = useState(0);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -280,6 +284,10 @@ export default function App() {
   }, [previewPdf]);
 
   // Scroll to the cited line whenever activeCitation changes.
+  // After scrolling, if the target page wasn't rendered yet (textLayer absent),
+  // poll until it appears then bump highlightKey. That forces a parent re-render
+  // → new `highlights` array reference → PdfHighlighter componentDidUpdate
+  // → renderHighlightLayers() — this time with a live textLayer → highlight renders.
   useEffect(() => {
     if (!activeCitation || !previewPdf) return;
 
@@ -301,6 +309,26 @@ export default function App() {
         });
         if (scrollToRef.current) {
           try { scrollToRef.current(citationToHighlight(activeCitation, pageDims)); } catch (_) {}
+        }
+
+        // If the page's textLayer isn't in the DOM yet (it was off-screen),
+        // renderHighlightLayers() returned null above. Poll until it appears,
+        // then nudge highlightKey to re-trigger renderHighlightLayers().
+        const page = activeCitation.page;
+        const targetPage = previewPaneRef.current?.querySelector(`[data-page-number="${page}"]`);
+        const textLayer = targetPage?.querySelector(".textLayer") as HTMLElement | null;
+        if (!textLayer || textLayer.children.length === 0) {
+          const waitForLayer = (retries: number) => {
+            if (cancelled) return;
+            const tp = previewPaneRef.current?.querySelector(`[data-page-number="${page}"]`);
+            const tl = tp?.querySelector(".textLayer") as HTMLElement | null;
+            if (tl && tl.children.length > 0) {
+              setHighlightKey(k => k + 1);
+            } else if (retries < 30) {
+              setTimeout(() => waitForLayer(retries + 1), 100);
+            }
+          };
+          waitForLayer(0);
         }
       } else if (attempts < 20) {
         attempts++;
