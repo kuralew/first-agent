@@ -42,10 +42,12 @@ app.post("/chat", async (req, res) => {
 });
 
 app.post("/chat/stream", async (req, res) => {
-  const { userMessage, history = [], doc } = req.body as {
+  const { userMessage, history = [], docText } = req.body as {
     userMessage: string;
     history: Anthropic.MessageParam[];
-    doc?: { extractedText: string; name: string; pageDims: Record<number, { w: number; h: number }> };
+    // Pre-assembled, labeled, doc-ID-prefixed text for all uploaded documents.
+    // Format: "=== Document 1: name.pdf ===\n[d1·p1·l0·bbox:...]..."
+    docText?: string;
   };
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -55,8 +57,8 @@ app.post("/chat/stream", async (req, res) => {
   const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
   try {
-    const userText = doc
-      ? `${userMessage || "Please analyze this document."}\n\nDocument: ${doc.name}\n\n${doc.extractedText}`
+    const userText = docText
+      ? `${userMessage || "Please analyze these documents."}\n\n${docText}`
       : userMessage;
 
     const messages: Anthropic.MessageParam[] = [
@@ -69,7 +71,7 @@ app.post("/chat/stream", async (req, res) => {
       (text) => send({ type: "chunk", text }),
       (name, input, result) => send({ type: "tool", name, input, result })
     );
-    send({ type: "done", history: messages, pageDims: doc?.pageDims ?? {} });
+    send({ type: "done", history: messages });
   } catch (err) {
     console.error(err);
     send({ type: "error", error: String(err) });
