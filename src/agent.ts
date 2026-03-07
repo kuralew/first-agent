@@ -47,7 +47,16 @@ Do not cite when writing from general legal knowledge.
 EXTRACT KEY FACTS — MANDATORY
 After producing the document brief, you MUST call the extract_key_facts tool with the structured data you identified.
 Include every party, every key fact/claim/violation/obligation, every significant date, and every monetary amount.
-Use the citation tags exactly as they appear in the source for each item.`;
+Use the citation tags exactly as they appear in the source for each item.
+
+DRAFT DOCUMENT — MANDATORY
+After calling extract_key_facts, you MUST call draft_document with a complete, professional draft appropriate for the document type.
+The draft must be ready to edit and file — not a template or placeholder. Write the full content.
+
+TOOL CALL DISCIPLINE — CRITICAL
+Call tools immediately and silently. Do NOT write any text before or between tool calls.
+Never narrate what you are about to do. Phrases like "I'll now call...", "Let me extract...", "Now I'll call the required tools simultaneously..." must never appear.
+Sequence: write the brief → call extract_key_facts → call draft_document. No commentary between steps.`;
 
 export type ToolLogCallback = (name: string, input: unknown, result: string) => void;
 

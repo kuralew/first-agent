@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   PdfLoader,
   PdfHighlighter,
@@ -7,7 +8,7 @@ import {
   Popup,
 } from "react-pdf-highlighter";
 import type { IHighlight, ScaledPosition } from "react-pdf-highlighter";
-import type { DisplayMessage, Citation, DocInfo, ExtractedFacts } from "./types.ts";
+import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft } from "./types.ts";
 import { extractTextWithBBoxes } from "./pdfExtract.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -26,6 +27,21 @@ const CITATION_RE = /\[d(\d+)·p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/g;
  * are treated as a range and merged into one citation whose bbox spans the
  * full passage.
  */
+// Phrases Claude sometimes emits before calling tools — strip them from display.
+const PLANNING_PHRASES = [
+  /^Now I['']ll call the required tools simultaneously\.?\n?/im,
+  /^I['']ll now call\b[^\n]*\n?/im,
+  /^Let me (now |)call\b[^\n]*\n?/im,
+  /^I['']ll call\b[^\n]*\n?/im,
+  /^Now(,| I['']ll)\b[^\n]*tools[^\n]*\n?/im,
+];
+
+function stripPlanningPhrases(text: string): string {
+  let out = text;
+  for (const re of PLANNING_PHRASES) out = out.replace(re, "");
+  return out;
+}
+
 function parseCitations(raw: string): { text: string; citations: Citation[] } {
   type TagMatch = {
     index: number; end: number;
@@ -194,6 +210,7 @@ function AssistantText({
   return (
     <div className="assistant-text">
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
           p: ({ children }) => <p>{injectCitations(children)}</p>,
           li: ({ children }) => <li>{injectCitations(children)}</li>,
@@ -337,6 +354,83 @@ function FactsCard({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Renders a drafted document with markdown preview and .docx download. */
+function DraftCard({ draft }: { draft: DocumentDraft }) {
+  const [expanded, setExpanded] = useState(true);
+
+  async function downloadDocx() {
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import("docx");
+
+    const children: InstanceType<typeof Paragraph>[] = [];
+
+    // Title
+    children.push(
+      new Paragraph({ text: draft.title, heading: HeadingLevel.TITLE })
+    );
+
+    // Parse markdown line by line into docx paragraphs.
+    for (const line of draft.content.split("\n")) {
+      if (line.startsWith("## ")) {
+        children.push(new Paragraph({ text: line.slice(3), heading: HeadingLevel.HEADING_2 }));
+      } else if (line.startsWith("# ")) {
+        children.push(new Paragraph({ text: line.slice(2), heading: HeadingLevel.HEADING_1 }));
+      } else if (line.startsWith("- ") || line.startsWith("* ")) {
+        children.push(new Paragraph({ text: line.slice(2), bullet: { level: 0 } }));
+      } else if (line.trim() === "") {
+        children.push(new Paragraph({ text: "" }));
+      } else {
+        // Handle inline **bold** spans.
+        const parts = line.split(/(\*\*[^*]+\*\*)/g);
+        const runs = parts.map((p) => {
+          if (p.startsWith("**") && p.endsWith("**")) {
+            return new TextRun({ text: p.slice(2, -2), bold: true });
+          }
+          return new TextRun({ text: p });
+        });
+        children.push(new Paragraph({ children: runs }));
+      }
+    }
+
+    const doc = new Document({ sections: [{ children }] });
+    const blob = await Packer.toBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${draft.title.replace(/[^a-z0-9]/gi, "-").toLowerCase()}.docx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="draft-card">
+      <div className="draft-card-header">
+        <div className="draft-card-title">
+          <span className="draft-card-icon">✦</span>
+          <span className="draft-card-type">{draft.draft_type}</span>
+          <span className="draft-card-name">{draft.title}</span>
+        </div>
+        <div className="draft-card-actions">
+          <button className="draft-download-btn" onClick={downloadDocx} title="Download as .docx">
+            Download .docx
+          </button>
+          <button
+            className="draft-toggle-btn"
+            onClick={() => setExpanded((e) => !e)}
+            aria-label={expanded ? "Collapse" : "Expand"}
+          >
+            {expanded ? "▲" : "▼"}
+          </button>
+        </div>
+      </div>
+      {expanded && (
+        <div className="draft-body">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.content}</ReactMarkdown>
         </div>
       )}
     </div>
@@ -621,7 +715,7 @@ export default function App() {
 
           if (data.type === "chunk") {
             rawAccum += data.text;
-            const { text: cleanText, citations } = parseCitations(rawAccum);
+            const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
 
             if (!started) {
               started = true;
@@ -649,6 +743,9 @@ export default function App() {
               const update: Partial<DisplayMessage> = { toolLogs };
               if (data.name === "extract_key_facts" && data.input) {
                 update.extractedFacts = data.input as ExtractedFacts;
+              }
+              if (data.name === "draft_document" && data.input) {
+                update.draft = data.input as DocumentDraft;
               }
               return [...msgs.slice(0, -1), { ...last, ...update }];
             });
@@ -764,6 +861,7 @@ export default function App() {
                         onCitationClick={handleCitationClick}
                       />
                     )}
+                    {msg.draft && <DraftCard draft={msg.draft} />}
                     <AssistantText
                       text={msg.text}
                       citations={msg.citations ?? []}
