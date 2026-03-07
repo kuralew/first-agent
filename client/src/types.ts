@@ -26,10 +26,43 @@ export interface DocInfo {
   pageDims: PageDims;
 }
 
+export interface ExtractedParty {
+  role: string;
+  name: string;
+  citation?: string;
+}
+
+export interface ExtractedFact {
+  category: string;
+  item: string;
+  citation?: string;
+}
+
+export interface KeyDate {
+  date: string;
+  description: string;
+  citation?: string;
+}
+
+export interface KeyAmount {
+  amount: string;
+  description: string;
+  citation?: string;
+}
+
+export interface ExtractedFacts {
+  document_type: string;
+  parties: ExtractedParty[];
+  facts: ExtractedFact[];
+  key_dates?: KeyDate[];
+  amounts?: KeyAmount[];
+}
+
 export interface DisplayMessage {
   role: "user" | "assistant";
   text: string;
   toolLogs?: ToolLog[];
-  docs?: DocInfo[];        // documents uploaded in this user message
+  docs?: DocInfo[];
   citations?: Citation[];
+  extractedFacts?: ExtractedFacts;
 }

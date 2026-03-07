@@ -7,7 +7,7 @@ import {
   Popup,
 } from "react-pdf-highlighter";
 import type { IHighlight, ScaledPosition } from "react-pdf-highlighter";
-import type { DisplayMessage, Citation, DocInfo } from "./types.ts";
+import type { DisplayMessage, Citation, DocInfo, ExtractedFacts } from "./types.ts";
 import { extractTextWithBBoxes } from "./pdfExtract.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -208,6 +208,137 @@ function AssistantText({
         {text}
       </ReactMarkdown>
       {streaming && isLast && <span className="cursor" />}
+    </div>
+  );
+}
+
+/** Renders extracted key facts as a structured, exportable card. */
+function FactsCard({
+  facts,
+  onCitationClick,
+}: {
+  facts: ExtractedFacts;
+  onCitationClick: (c: Citation) => void;
+}) {
+  // Parse a raw citation tag string into a Citation object for button rendering.
+  function parseSingleTag(tag: string | undefined, fallbackId: number): Citation | null {
+    if (!tag) return null;
+    const m = tag.match(/\[d(\d+)·p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/);
+    if (!m) return null;
+    return { id: fallbackId, docId: +m[1], page: +m[2], x1: +m[4], y1: +m[5], x2: +m[6], y2: +m[7], quote: "" };
+  }
+
+  function CitationButton({ tag, id }: { tag?: string; id: number }) {
+    const c = parseSingleTag(tag, id);
+    if (!c) return null;
+    return (
+      <button
+        className="citation-btn"
+        onClick={() => onCitationClick(c)}
+        title={`Jump to source — Doc ${c.docId}, page ${c.page}`}
+      >
+        ↗
+      </button>
+    );
+  }
+
+  // Group facts by category.
+  const byCategory = facts.facts.reduce<Record<string, typeof facts.facts>>((acc, f) => {
+    (acc[f.category] = acc[f.category] ?? []).push(f);
+    return acc;
+  }, {});
+
+  function exportJson() {
+    const blob = new Blob([JSON.stringify(facts, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "extracted-facts.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  let citationCounter = 5000;
+
+  return (
+    <div className="facts-card">
+      <div className="facts-card-header">
+        <div className="facts-card-title">
+          <span className="facts-card-icon">⬡</span>
+          <span>Extracted Facts</span>
+          <span className="facts-card-doctype">{facts.document_type}</span>
+        </div>
+        <button className="facts-export-btn" onClick={exportJson} title="Export as JSON">
+          Export JSON
+        </button>
+      </div>
+
+      {/* Parties */}
+      {facts.parties.length > 0 && (
+        <div className="facts-section">
+          <div className="facts-section-label">Parties</div>
+          <table className="facts-table">
+            <tbody>
+              {facts.parties.map((p, i) => (
+                <tr key={i}>
+                  <td className="facts-role">{p.role}</td>
+                  <td className="facts-name">
+                    {p.name}
+                    <CitationButton tag={p.citation} id={citationCounter++} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Facts by category */}
+      {Object.entries(byCategory).map(([category, items]) => (
+        <div className="facts-section" key={category}>
+          <div className="facts-section-label">{category}</div>
+          <ul className="facts-list">
+            {items.map((f, i) => (
+              <li key={i}>
+                <span>{f.item}</span>
+                <CitationButton tag={f.citation} id={citationCounter++} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+
+      {/* Key Dates */}
+      {facts.key_dates && facts.key_dates.length > 0 && (
+        <div className="facts-section">
+          <div className="facts-section-label">Key Dates</div>
+          <ul className="facts-list">
+            {facts.key_dates.map((d, i) => (
+              <li key={i}>
+                <span className="facts-date">{d.date}</span>
+                <span className="facts-date-desc">{d.description}</span>
+                <CitationButton tag={d.citation} id={citationCounter++} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Amounts */}
+      {facts.amounts && facts.amounts.length > 0 && (
+        <div className="facts-section">
+          <div className="facts-section-label">Amounts</div>
+          <ul className="facts-list">
+            {facts.amounts.map((a, i) => (
+              <li key={i}>
+                <span className="facts-amount">{a.amount}</span>
+                <span className="facts-date-desc">{a.description}</span>
+                <CitationButton tag={a.citation} id={citationCounter++} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -515,7 +646,11 @@ export default function App() {
                 ...(last.toolLogs ?? []),
                 { name: data.name ?? "", input: data.input, result: data.result ?? "" },
               ];
-              return [...msgs.slice(0, -1), { ...last, toolLogs }];
+              const update: Partial<DisplayMessage> = { toolLogs };
+              if (data.name === "extract_key_facts" && data.input) {
+                update.extractedFacts = data.input as ExtractedFacts;
+              }
+              return [...msgs.slice(0, -1), { ...last, ...update }];
             });
           } else if (data.type === "done") {
             if (data.history) setHistory(data.history);
@@ -622,6 +757,12 @@ export default function App() {
                           ))}
                         </div>
                       </details>
+                    )}
+                    {msg.extractedFacts && (
+                      <FactsCard
+                        facts={msg.extractedFacts}
+                        onCitationClick={handleCitationClick}
+                      />
                     )}
                     <AssistantText
                       text={msg.text}
