@@ -42,7 +42,12 @@ Cross-document fact (same claim supported by two documents) — cite both, one t
   "Both parties acknowledged the payment was overdue.[d1·p4·l2·bbox:72,600,400,614][d2·p1·l8·bbox:72,700,400,714]"
 
 Copy every tag exactly as it appears in the source — do not modify the docId, coordinates, or any part of the tag.
-Do not cite when writing from general legal knowledge.`;
+Do not cite when writing from general legal knowledge.
+
+EXTRACT KEY FACTS — MANDATORY
+After producing the document brief, you MUST call the extract_key_facts tool with the structured data you identified.
+Include every party, every key fact/claim/violation/obligation, every significant date, and every monetary amount.
+Use the citation tags exactly as they appear in the source for each item.`;
 
 export type ToolLogCallback = (name: string, input: unknown, result: string) => void;
 
