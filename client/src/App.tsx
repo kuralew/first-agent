@@ -953,10 +953,31 @@ export default function App() {
       setCaseName(name);
       caseNameRef.current = name;
     }
-    // Strip blob URLs — they're session-only and can't be persisted.
+    // Upload any blob-URL PDFs to the server so they persist across sessions.
+    const urlMap = new Map<string, string>(); // blob URL → server URL
+    for (const doc of sessionDocsRef.current) {
+      if (!doc.url.startsWith("blob:")) continue;
+      try {
+        const blob = await fetch(doc.url).then((r) => r.blob());
+        const res = await fetch(`http://localhost:3001/cases/${id}/docs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/pdf", "x-filename": doc.name },
+          body: blob,
+        });
+        if (res.ok) {
+          const { url } = await res.json();
+          urlMap.set(doc.url, `http://localhost:3001${url}`);
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Serialize messages: substitute server URLs for blob URLs, keep pageDims.
     const serialized = msgs.map((m) => ({
       ...m,
-      docs: m.docs?.map((d) => ({ ...d, url: "", pageDims: {} })),
+      docs: m.docs?.map((d) => ({
+        ...d,
+        url: urlMap.get(d.url) ?? (d.url.startsWith("blob:") ? "" : d.url),
+      })),
     }));
     try {
       await fetch(`http://localhost:3001/cases/${id}`, {
@@ -1429,15 +1450,17 @@ export default function App() {
                           <span className="user-attachment-name">{doc.name}</span>
                           <span className="user-attachment-meta">PDF Document</span>
                         </div>
-                        {doc.url && <button
-                          className="user-attachment-view"
-                          onClick={() => {
-                            setActiveCitation(null);
-                            setPreviewPdf({ url: doc.url, name: doc.name });
-                          }}
-                        >
-                          View
-                        </button>}
+                        {doc.url && (
+                          <button
+                            className="user-attachment-view"
+                            onClick={() => {
+                              setActiveCitation(null);
+                              setPreviewPdf({ url: doc.url, name: doc.name });
+                            }}
+                          >
+                            View
+                          </button>
+                        )}
                       </div>
                     ))}
                     {msg.text &&

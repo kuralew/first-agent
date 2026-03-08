@@ -113,9 +113,36 @@ app.post("/cases/:id", (req, res) => {
 });
 
 app.delete("/cases/:id", (req, res) => {
-  const file = path.join(casesDir, `${sanitizeCaseId(req.params.id)}.json`);
+  const id = sanitizeCaseId(req.params.id);
+  const file = path.join(casesDir, `${id}.json`);
   if (fs.existsSync(file)) fs.unlinkSync(file);
+  // Also remove uploaded docs folder if present.
+  const docsDir = path.join(casesDir, id, "docs");
+  if (fs.existsSync(docsDir)) fs.rmSync(docsDir, { recursive: true, force: true });
   res.json({ ok: true });
+});
+
+// Upload a PDF for a case — stored at ./cases/{id}/docs/{filename}.
+app.post(
+  "/cases/:id/docs",
+  express.raw({ type: "application/pdf", limit: "100mb" }),
+  (req, res) => {
+    const id = sanitizeCaseId(req.params.id);
+    const filename = path.basename((req.headers["x-filename"] as string) || "document.pdf");
+    const docsDir = path.join(casesDir, id, "docs");
+    if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(path.join(docsDir, filename), req.body as Buffer);
+    res.json({ url: `/cases/${id}/docs/${encodeURIComponent(filename)}` });
+  }
+);
+
+// Serve uploaded PDFs.
+app.get("/cases/:id/docs/:filename", (req, res) => {
+  const id = sanitizeCaseId(req.params.id);
+  const filename = path.basename(req.params.filename);
+  const file = path.join(casesDir, id, "docs", filename);
+  if (!fs.existsSync(file)) return res.status(404).send("Not found");
+  res.sendFile(file);
 });
 
 app.post("/chat", async (req, res) => {
