@@ -472,6 +472,16 @@ export default function App() {
   const sessionDocsRef = useRef<DocInfo[]>([]);
   useEffect(() => { sessionDocsRef.current = sessionDocs; }, [sessionDocs]);
 
+  // Intake pipeline state.
+  const [intakeNotification, setIntakeNotification] = useState<string | null>(null);
+  // Refs so async intake callback always sees latest values.
+  const nextDocIdRef = useRef(1);
+  useEffect(() => { nextDocIdRef.current = nextDocId; }, [nextDocId]);
+  const historyRef = useRef<unknown[]>([]);
+  useEffect(() => { historyRef.current = history; }, [history]);
+  // Ref to intakeAnalyze so the EventSource effect can call it without re-subscribing.
+  const intakeAnalyzeRef = useRef<((filename: string, url: string) => Promise<void>) | null>(null);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [displayMessages, loading]);
@@ -482,6 +492,21 @@ export default function App() {
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
   }, [input]);
+
+  // Connect to server-sent events; auto-analyze any PDF dropped in ./inbox/.
+  useEffect(() => {
+    const es = new EventSource("http://localhost:3001/events");
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === "new_document") {
+          setIntakeNotification(data.filename);
+          intakeAnalyzeRef.current?.(data.filename, `http://localhost:3001${data.url}`);
+        }
+      } catch { /* ignore malformed events */ }
+    };
+    return () => es.close();
+  }, []);
 
   // When the preview pane first opens (previewPdf changes), wait for pdfjs to
   // initialise, scroll to the pending citation's page, then wait for the
@@ -634,6 +659,101 @@ export default function App() {
       setActiveCitation(citation);
     }
   }
+
+  async function intakeAnalyze(filename: string, serverUrl: string) {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const response = await fetch(serverUrl);
+      const blob = await response.blob();
+      const file = new File([blob], filename, { type: "application/pdf" });
+      const objectUrl = URL.createObjectURL(file);
+      const { text: rawText, pageDims } = await extractTextWithBBoxes(file);
+
+      const docId = nextDocIdRef.current;
+      const prefixedText = rawText.replace(/^\[p/gm, `[d${docId}\u00B7p`);
+      const newDoc: DocInfo = { id: docId, name: filename, url: objectUrl, pageDims };
+
+      setSessionDocs((prev) => [...prev, newDoc]);
+      setNextDocId(docId + 1);
+      setDisplayMessages((prev) => [
+        ...prev,
+        { role: "user", text: `Analyze: ${filename}`, docs: [newDoc], isIntake: true },
+      ]);
+
+      const res = await fetch("http://localhost:3001/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userMessage: `Please analyze this document: ${filename}`,
+          history: historyRef.current,
+          docText: `=== Document ${docId}: ${filename} ===\n${prefixedText.trim()}\n\n`,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let started = false;
+      let rawAccum = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+          if (!part.startsWith("data: ")) continue;
+          let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; error?: string; };
+          try { data = JSON.parse(part.slice(6)); } catch { continue; }
+          if (data.type === "chunk") {
+            rawAccum += data.text;
+            const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
+            if (!started) {
+              started = true;
+              setLoading(false);
+              setStreaming(true);
+              setDisplayMessages((prev) => [...prev, { role: "assistant", text: cleanText, toolLogs: [], citations }]);
+            } else {
+              setDisplayMessages((prev) => {
+                const msgs = [...prev];
+                const last = msgs[msgs.length - 1];
+                return [...msgs.slice(0, -1), { ...last, text: cleanText, citations }];
+              });
+            }
+          } else if (data.type === "tool") {
+            setDisplayMessages((prev) => {
+              const msgs = [...prev];
+              const last = msgs[msgs.length - 1];
+              const toolLogs = [...(last.toolLogs ?? []), { name: data.name ?? "", input: data.input, result: data.result ?? "" }];
+              const update: Partial<DisplayMessage> = { toolLogs };
+              if (data.name === "extract_key_facts" && data.input) update.extractedFacts = data.input as ExtractedFacts;
+              if (data.name === "draft_document" && data.input) update.draft = data.input as DocumentDraft;
+              return [...msgs.slice(0, -1), { ...last, ...update }];
+            });
+          } else if (data.type === "done") {
+            if (data.history) setHistory(data.history);
+          } else if (data.type === "error") {
+            throw new Error(data.error);
+          }
+        }
+      }
+
+      if (!started) {
+        setDisplayMessages((prev) => [...prev, { role: "assistant", text: "(no response)", toolLogs: [], citations: [] }]);
+      }
+    } catch (err) {
+      setDisplayMessages((prev) => [...prev, { role: "assistant", text: `Intake error: ${String(err)}` }]);
+    } finally {
+      setLoading(false);
+      setStreaming(false);
+    }
+  }
+  // Keep ref current so the EventSource effect always calls the latest version.
+  intakeAnalyzeRef.current = intakeAnalyze;
 
   async function send() {
     const text = input.trim();
@@ -816,6 +936,14 @@ export default function App() {
           </div>
         </header>
 
+        {intakeNotification && (
+          <div className="intake-notification">
+            <span className="intake-notification-icon">⚡</span>
+            <span>Auto-analyzing: <strong>{intakeNotification}</strong></span>
+            <button className="intake-notification-close" onClick={() => setIntakeNotification(null)}>×</button>
+          </div>
+        )}
+
         <div className="messages">
           {isEmpty && (
             <div className="empty-state">
@@ -872,6 +1000,9 @@ export default function App() {
                   </>
                 ) : (
                   <div className="user-message-stack">
+                    {msg.isIntake && (
+                      <div className="intake-badge">⚡ Auto-analyzed from inbox</div>
+                    )}
                     {msg.docs?.map((doc) => (
                       <div key={doc.id} className="user-attachment-card">
                         <div className="user-attachment-icon">

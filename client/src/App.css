@@ -1229,3 +1229,54 @@ body {
 .draft-body tr:nth-child(even) td {
   background: rgba(0, 0, 0, 0.015);
 }
+
+/* ── Intake pipeline ─────────────────────────────── */
+
+.intake-notification {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #1B3A6B;
+  color: #fff;
+  font-size: 0.82rem;
+  padding: 0.55rem 1rem;
+  animation: slideDown 0.25s ease;
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.intake-notification-icon {
+  font-size: 0.95rem;
+}
+
+.intake-notification-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.75);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+.intake-notification-close:hover {
+  color: #fff;
+}
+
+.intake-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #1B3A6B;
+  background: #E8EDF5;
+  border: 1px solid rgba(27, 58, 107, 0.2);
+  border-radius: 4px;
+  padding: 0.2rem 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-bottom: 0.4rem;
+}

@@ -72,4 +72,5 @@ export interface DisplayMessage {
   citations?: Citation[];
   extractedFacts?: ExtractedFacts;
   draft?: DocumentDraft;
+  isIntake?: boolean;   // true when triggered by the file watcher, not the user
 }
