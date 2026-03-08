@@ -8,7 +8,7 @@ import {
   Popup,
 } from "react-pdf-highlighter";
 import type { IHighlight, ScaledPosition } from "react-pdf-highlighter";
-import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext } from "./types.ts";
+import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, CaseListItem, SavedCase } from "./types.ts";
 import { extractTextWithBBoxes } from "./pdfExtract.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -614,6 +614,77 @@ function LegalContextCard({ context }: { context: LegalContext }) {
   );
 }
 
+// ── Case sidebar ──────────────────────────────────────────────────────────────
+
+function formatRelativeDate(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  if (diff < 604_800_000) return `${Math.floor(diff / 86_400_000)}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function CaseSidebar({
+  cases,
+  activeCaseId,
+  caseName,
+  onLoad,
+  onDelete,
+  onNew,
+  onRename,
+}: {
+  cases: CaseListItem[];
+  activeCaseId: string | null;
+  caseName: string;
+  onLoad: (id: string) => void;
+  onDelete: (id: string, e: React.MouseEvent) => void;
+  onNew: () => void;
+  onRename: (name: string) => void;
+}) {
+  return (
+    <div className="case-sidebar">
+      <div className="case-sidebar-header">
+        <span className="case-sidebar-title">Cases</span>
+        <button className="case-new-btn" onClick={onNew} title="New case">＋</button>
+      </div>
+
+      {activeCaseId && (
+        <div className="case-active-name">
+          <input
+            className="case-name-input"
+            value={caseName}
+            onChange={(e) => onRename(e.target.value)}
+            placeholder="Name this case…"
+          />
+        </div>
+      )}
+
+      <div className="case-list">
+        {cases.length === 0 ? (
+          <div className="case-empty">No saved cases yet</div>
+        ) : (
+          cases.map((c) => (
+            <div
+              key={c.id}
+              className={`case-item${c.id === activeCaseId ? " case-item-active" : ""}`}
+              onClick={() => onLoad(c.id)}
+            >
+              <div className="case-item-name">{c.name}</div>
+              <div className="case-item-meta">{formatRelativeDate(c.updatedAt)}</div>
+              <button
+                className="case-delete-btn"
+                onClick={(e) => onDelete(c.id, e)}
+                title="Delete case"
+              >×</button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -623,6 +694,12 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [toolRunning, setToolRunning] = useState<string | null>(null);
+
+  // Case memory
+  const [cases, setCases] = useState<CaseListItem[]>([]);
+  const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
+  const [caseName, setCaseName] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Docs staged in the input area, not yet sent.
   const [pendingDocs, setPendingDocs] = useState<
@@ -649,6 +726,12 @@ export default function App() {
   // Always-current sessionDocs for use inside async callbacks.
   const sessionDocsRef = useRef<DocInfo[]>([]);
   useEffect(() => { sessionDocsRef.current = sessionDocs; }, [sessionDocs]);
+
+  // Always-current case refs — needed inside async streaming callbacks.
+  const activeCaseIdRef = useRef<string | null>(null);
+  useEffect(() => { activeCaseIdRef.current = activeCaseId; }, [activeCaseId]);
+  const caseNameRef = useRef("");
+  useEffect(() => { caseNameRef.current = caseName; }, [caseName]);
 
   // Intake pipeline state.
   const [intakeNotification, setIntakeNotification] = useState<string | null>(null);
@@ -685,6 +768,19 @@ export default function App() {
     };
     return () => es.close();
   }, []);
+
+  // Load case list on mount.
+  useEffect(() => { fetchCases(); }, []);
+
+  // Auto-save whenever streaming ends and we have an active case.
+  // Using streaming as the sole dep is intentional — we read the latest committed
+  // displayMessages and history (React has already flushed all state updates by
+  // the time this effect runs after streaming→false).
+  useEffect(() => {
+    if (!streaming && activeCaseIdRef.current && displayMessages.length > 0) {
+      saveCase(displayMessages, history);
+    }
+  }, [streaming]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When the preview pane first opens (previewPdf changes), wait for pdfjs to
   // initialise, scroll to the pending citation's page, then wait for the
@@ -838,8 +934,96 @@ export default function App() {
     }
   }
 
+  async function fetchCases() {
+    try {
+      const res = await fetch("http://localhost:3001/cases");
+      if (res.ok) setCases(await res.json());
+    } catch { /* server may not be running */ }
+  }
+
+  async function saveCase(msgs: DisplayMessage[], hist: unknown[]) {
+    const id = activeCaseIdRef.current;
+    if (!id) return;
+    let name = caseNameRef.current;
+    if (!name) {
+      const firstDoc = msgs.find((m) => m.docs?.length)?.docs?.[0];
+      name = firstDoc
+        ? firstDoc.name.replace(/\.pdf$/i, "")
+        : `Case ${new Date().toLocaleDateString()}`;
+      setCaseName(name);
+      caseNameRef.current = name;
+    }
+    // Strip blob URLs — they're session-only and can't be persisted.
+    const serialized = msgs.map((m) => ({
+      ...m,
+      docs: m.docs?.map((d) => ({ ...d, url: "", pageDims: {} })),
+    }));
+    try {
+      await fetch(`http://localhost:3001/cases/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, history: hist, displayMessages: serialized }),
+      });
+      fetchCases();
+    } catch { /* ignore */ }
+  }
+
+  async function loadCase(id: string) {
+    try {
+      const res = await fetch(`http://localhost:3001/cases/${id}`);
+      if (!res.ok) return;
+      const data: SavedCase = await res.json();
+      setActiveCaseId(data.id);
+      activeCaseIdRef.current = data.id;
+      setCaseName(data.name);
+      caseNameRef.current = data.name;
+      setHistory(data.history);
+      setDisplayMessages(data.displayMessages);
+      // Rebuild sessionDocs from saved messages (no blob URLs — View is hidden).
+      const loadedDocs: DocInfo[] = [];
+      for (const msg of data.displayMessages) {
+        for (const doc of msg.docs ?? []) {
+          if (!loadedDocs.find((d) => d.id === doc.id)) loadedDocs.push(doc);
+        }
+      }
+      setSessionDocs(loadedDocs);
+      setNextDocId(Math.max(0, ...loadedDocs.map((d) => d.id)) + 1);
+      setPreviewPdf(null);
+      setActiveCitation(null);
+      setInput("");
+      setPendingDocs([]);
+    } catch { /* ignore */ }
+  }
+
+  async function deleteCase(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    await fetch(`http://localhost:3001/cases/${id}`, { method: "DELETE" });
+    if (activeCaseIdRef.current === id) startNewCase();
+    fetchCases();
+  }
+
+  function startNewCase() {
+    setActiveCaseId(null);
+    activeCaseIdRef.current = null;
+    setCaseName("");
+    caseNameRef.current = "";
+    setHistory([]);
+    setDisplayMessages([]);
+    setSessionDocs([]);
+    setNextDocId(1);
+    setPreviewPdf(null);
+    setActiveCitation(null);
+    setInput("");
+    setPendingDocs([]);
+  }
+
   async function intakeAnalyze(filename: string, serverUrl: string) {
     if (loading) return;
+    if (!activeCaseIdRef.current) {
+      const newId = `case_${Date.now()}`;
+      setActiveCaseId(newId);
+      activeCaseIdRef.current = newId;
+    }
     setLoading(true);
     try {
       const response = await fetch(serverUrl);
@@ -945,6 +1129,12 @@ export default function App() {
     const docsToSend = [...pendingDocs];
     setInput("");
     setPendingDocs([]);
+
+    if (!activeCaseIdRef.current) {
+      const newId = `case_${Date.now()}`;
+      setActiveCaseId(newId);
+      activeCaseIdRef.current = newId;
+    }
 
     setLoading(true);
 
@@ -1112,11 +1302,31 @@ export default function App() {
   }, []);
 
   return (
-    <div className={`layout ${previewPdf ? "layout-split" : ""}`}>
+    <div className={`layout${sidebarOpen ? " layout-sidebar" : ""}${previewPdf ? " layout-preview" : ""}`}>
+      <CaseSidebar
+        cases={cases}
+        activeCaseId={activeCaseId}
+        caseName={caseName}
+        onLoad={loadCase}
+        onDelete={deleteCase}
+        onNew={startNewCase}
+        onRename={(name) => { setCaseName(name); caseNameRef.current = name; }}
+      />
       {/* ── Chat pane ── */}
-      <div className={`app${previewPdf ? " app-split" : ""}`}>
+      <div className="app">
         <header className="header">
           <div className="header-inner">
+            <button
+              className="sidebar-toggle"
+              onClick={() => setSidebarOpen((o) => !o)}
+              title={sidebarOpen ? "Hide cases" : "Show cases"}
+            >
+              <svg viewBox="0 0 18 14" fill="none" width="18" height="14">
+                <rect y="0" width="18" height="2" rx="1" fill="currentColor" />
+                <rect y="6" width="12" height="2" rx="1" fill="currentColor" />
+                <rect y="12" width="18" height="2" rx="1" fill="currentColor" />
+              </svg>
+            </button>
             <span className="header-logo">
               <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="22" height="22">
                 <circle cx="12" cy="12" r="12" fill="#1B3A6B" />
@@ -1219,7 +1429,7 @@ export default function App() {
                           <span className="user-attachment-name">{doc.name}</span>
                           <span className="user-attachment-meta">PDF Document</span>
                         </div>
-                        <button
+                        {doc.url && <button
                           className="user-attachment-view"
                           onClick={() => {
                             setActiveCitation(null);
@@ -1227,7 +1437,7 @@ export default function App() {
                           }}
                         >
                           View
-                        </button>
+                        </button>}
                       </div>
                     ))}
                     {msg.text &&

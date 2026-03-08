@@ -21,6 +21,149 @@ body {
   overflow: hidden;
 }
 
+/* ── Case sidebar ────────────────────────────────── */
+
+.case-sidebar {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  transition: width 0.22s ease, min-width 0.22s ease;
+  border-right: 1px solid #EAE6E0;
+  display: flex;
+  flex-direction: column;
+  background: #F5F2EE;
+  flex-shrink: 0;
+}
+
+.layout-sidebar .case-sidebar {
+  width: 230px;
+  min-width: 230px;
+}
+
+.case-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1rem 0.7rem;
+  border-bottom: 1px solid #EAE6E0;
+}
+
+.case-sidebar-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  color: #888;
+  text-transform: uppercase;
+}
+
+.case-new-btn {
+  background: none;
+  border: 1px solid #D0CABD;
+  border-radius: 5px;
+  color: #555;
+  font-size: 1rem;
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.case-new-btn:hover { background: #EAE6E0; }
+
+.case-active-name {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid #EAE6E0;
+}
+
+.case-name-input {
+  width: 100%;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1A1A1A;
+  background: none;
+  border: none;
+  outline: none;
+  padding: 0;
+  font-family: inherit;
+}
+
+.case-name-input::placeholder { color: #AAA; font-weight: 400; }
+
+.case-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.4rem 0;
+}
+
+.case-empty {
+  padding: 1.2rem 1rem;
+  font-size: 0.78rem;
+  color: #AAA;
+  text-align: center;
+}
+
+.case-item {
+  position: relative;
+  padding: 0.6rem 2rem 0.6rem 1rem;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.12s;
+}
+.case-item:hover { background: #EAE6E0; }
+.case-item-active { background: #E0DBD4; }
+.case-item-active:hover { background: #D9D3CA; }
+
+.case-item-name {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #1A1A1A;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.case-item-meta {
+  font-size: 0.7rem;
+  color: #999;
+  margin-top: 0.15rem;
+}
+
+.case-delete-btn {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #BBB;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.case-item:hover .case-delete-btn { opacity: 1; }
+.case-delete-btn:hover { color: #B71C1C; }
+
+/* ── Header sidebar toggle ───────────────────────── */
+
+.sidebar-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #888;
+  padding: 0.25rem;
+  margin-right: 0.5rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s, background 0.15s;
+}
+.sidebar-toggle:hover { color: #1B3A6B; background: rgba(27,58,107,0.06); }
+
 .app {
   display: flex;
   flex-direction: column;
@@ -29,12 +172,12 @@ body {
   min-width: 0;
 }
 
-.layout-split .app {
+.layout-preview .app {
   border-right: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 /* When no PDF pane, cap only the input area so typing stays comfortable */
-.app:not(.app-split) .input-wrap {
+.app:not(.layout-preview) .input-wrap {
   max-width: 860px;
   width: 100%;
   margin: 0 auto;
@@ -154,7 +297,7 @@ body {
 }
 
 /* In split mode, tighter side padding so the PDF pane gets more space */
-.app-split .messages {
+.layout-preview .messages {
   padding: 2rem 1rem;
 }
 

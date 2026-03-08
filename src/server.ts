@@ -53,6 +53,71 @@ watch(inboxDir, { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 1
     broadcast({ type: "new_document", filename, url: `/inbox/${encodeURIComponent(filename)}` });
   });
 
+// ── Case storage ─────────────────────────────────────────────────────────────
+
+const casesDir = path.join(__dirname, "../../cases");
+if (!fs.existsSync(casesDir)) fs.mkdirSync(casesDir, { recursive: true });
+
+function sanitizeCaseId(id: string) {
+  return id.replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+app.get("/cases", (_req, res) => {
+  try {
+    const files = fs.readdirSync(casesDir).filter((f) => f.endsWith(".json"));
+    const cases = files
+      .map((f) => {
+        try {
+          const raw = JSON.parse(fs.readFileSync(path.join(casesDir, f), "utf-8"));
+          return { id: raw.id, name: raw.name, createdAt: raw.createdAt, updatedAt: raw.updatedAt };
+        } catch { return null; }
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    res.json(cases);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.get("/cases/:id", (req, res) => {
+  const file = path.join(casesDir, `${sanitizeCaseId(req.params.id)}.json`);
+  if (!fs.existsSync(file)) return res.status(404).json({ error: "Not found" });
+  try {
+    res.json(JSON.parse(fs.readFileSync(file, "utf-8")));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post("/cases/:id", (req, res) => {
+  const id = sanitizeCaseId(req.params.id);
+  const file = path.join(casesDir, `${id}.json`);
+  try {
+    const existing = fs.existsSync(file)
+      ? JSON.parse(fs.readFileSync(file, "utf-8"))
+      : null;
+    const data = {
+      id,
+      name: req.body.name ?? "Untitled Case",
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      history: req.body.history ?? [],
+      displayMessages: req.body.displayMessages ?? [],
+    };
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.delete("/cases/:id", (req, res) => {
+  const file = path.join(casesDir, `${sanitizeCaseId(req.params.id)}.json`);
+  if (fs.existsSync(file)) fs.unlinkSync(file);
+  res.json({ ok: true });
+});
+
 app.post("/chat", async (req, res) => {
   const { userMessage, history = [] } = req.body as {
     userMessage: string;

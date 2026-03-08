@@ -98,6 +98,18 @@ export interface LegalContext {
   findings: LegalFinding[];
 }
 
+export interface CaseListItem {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SavedCase extends CaseListItem {
+  history: unknown[];
+  displayMessages: DisplayMessage[];
+}
+
 export interface DisplayMessage {
   role: "user" | "assistant";
   text: string;
