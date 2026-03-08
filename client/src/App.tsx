@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import type { ReportData } from "./ReportPdf.tsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -1499,6 +1500,61 @@ export default function App() {
       ? [citationToHighlight(activeCitation, sessionDocs)]
       : [];
 
+  // ── Report export ──────────────────────────────────────────────────────────
+  const [exporting, setExporting] = useState(false);
+
+  // Collect the latest of each card type from all messages.
+  const reportData: ReportData | null = (() => {
+    let facts: ReportData["facts"];
+    let draft: ReportData["draft"];
+    let draftApproved = false;
+    let risks: ReportData["risks"];
+    let legalContext: ReportData["legalContext"];
+
+    for (const msg of displayMessages) {
+      if (msg.extractedFacts) facts = msg.extractedFacts;
+      if (msg.draft) {
+        draft = msg.draft;
+        draftApproved = msg.draftReview?.status === "approved";
+      }
+      if (msg.risks) risks = msg.risks;
+      if (msg.legalContext) legalContext = msg.legalContext;
+    }
+
+    if (!facts && !draft && !risks && !legalContext) return null;
+
+    return {
+      caseName: caseName || "Untitled Case",
+      generatedAt: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+      facts,
+      draft,
+      draftApproved,
+      risks,
+      legalContext,
+    };
+  })();
+
+  async function exportReport() {
+    if (!reportData || exporting) return;
+    setExporting(true);
+    try {
+      // Lazy-load the heavy PDF renderer only when needed.
+      const [{ pdf }, { ReportPdf }] = await Promise.all([
+        import("@react-pdf/renderer"),
+        import("./ReportPdf.tsx"),
+      ]);
+      const blob = await pdf(<ReportPdf data={reportData} />).toBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${reportData.caseName.replace(/[^a-z0-9]/gi, "-").toLowerCase()}-mlex-report.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const isEmpty = displayMessages.length === 0 && !loading;
   const canSend = !loading && (!!input.trim() || pendingDocs.length > 0);
 
@@ -1541,6 +1597,16 @@ export default function App() {
             <span className="header-title">MLex</span>
             <span className="header-model">McDermott Will &amp; Schulte</span>
           </div>
+          {reportData && (
+            <button
+              className="export-report-btn"
+              onClick={exportReport}
+              disabled={exporting}
+              title="Export full analysis as PDF"
+            >
+              {exporting ? "Generating…" : "Export Report"}
+            </button>
+          )}
         </header>
 
         {intakeNotification && (
