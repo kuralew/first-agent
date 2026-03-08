@@ -53,6 +53,98 @@ watch(inboxDir, { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 1
     broadcast({ type: "new_document", filename, url: `/inbox/${encodeURIComponent(filename)}` });
   });
 
+// ── Case storage ─────────────────────────────────────────────────────────────
+
+const casesDir = path.join(__dirname, "../../cases");
+if (!fs.existsSync(casesDir)) fs.mkdirSync(casesDir, { recursive: true });
+
+function sanitizeCaseId(id: string) {
+  return id.replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+app.get("/cases", (_req, res) => {
+  try {
+    const files = fs.readdirSync(casesDir).filter((f) => f.endsWith(".json"));
+    const cases = files
+      .map((f) => {
+        try {
+          const raw = JSON.parse(fs.readFileSync(path.join(casesDir, f), "utf-8"));
+          return { id: raw.id, name: raw.name, createdAt: raw.createdAt, updatedAt: raw.updatedAt };
+        } catch { return null; }
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    res.json(cases);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.get("/cases/:id", (req, res) => {
+  const file = path.join(casesDir, `${sanitizeCaseId(req.params.id)}.json`);
+  if (!fs.existsSync(file)) return res.status(404).json({ error: "Not found" });
+  try {
+    res.json(JSON.parse(fs.readFileSync(file, "utf-8")));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post("/cases/:id", (req, res) => {
+  const id = sanitizeCaseId(req.params.id);
+  const file = path.join(casesDir, `${id}.json`);
+  try {
+    const existing = fs.existsSync(file)
+      ? JSON.parse(fs.readFileSync(file, "utf-8"))
+      : null;
+    const data = {
+      id,
+      name: req.body.name ?? "Untitled Case",
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      history: req.body.history ?? [],
+      displayMessages: req.body.displayMessages ?? [],
+    };
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.delete("/cases/:id", (req, res) => {
+  const id = sanitizeCaseId(req.params.id);
+  const file = path.join(casesDir, `${id}.json`);
+  if (fs.existsSync(file)) fs.unlinkSync(file);
+  // Also remove uploaded docs folder if present.
+  const docsDir = path.join(casesDir, id, "docs");
+  if (fs.existsSync(docsDir)) fs.rmSync(docsDir, { recursive: true, force: true });
+  res.json({ ok: true });
+});
+
+// Upload a PDF for a case — stored at ./cases/{id}/docs/{filename}.
+app.post(
+  "/cases/:id/docs",
+  express.raw({ type: "application/pdf", limit: "100mb" }),
+  (req, res) => {
+    const id = sanitizeCaseId(req.params.id);
+    const filename = path.basename((req.headers["x-filename"] as string) || "document.pdf");
+    const docsDir = path.join(casesDir, id, "docs");
+    if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(path.join(docsDir, filename), req.body as Buffer);
+    res.json({ url: `/cases/${id}/docs/${encodeURIComponent(filename)}` });
+  }
+);
+
+// Serve uploaded PDFs.
+app.get("/cases/:id/docs/:filename", (req, res) => {
+  const id = sanitizeCaseId(req.params.id);
+  const filename = path.basename(req.params.filename);
+  const file = path.join(casesDir, id, "docs", filename);
+  if (!fs.existsSync(file)) return res.status(404).send("Not found");
+  res.sendFile(file);
+});
+
 app.post("/chat", async (req, res) => {
   const { userMessage, history = [] } = req.body as {
     userMessage: string;
