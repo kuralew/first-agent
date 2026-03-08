@@ -4,7 +4,6 @@ import {
   Text,
   View,
   StyleSheet,
-  Font,
 } from "@react-pdf/renderer";
 import type { ExtractedFacts, DocumentRisks, DocumentDraft, LegalContext, RiskLevel } from "./types.ts";
 

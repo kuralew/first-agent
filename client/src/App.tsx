@@ -1,6 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { pdf } from "@react-pdf/renderer";
-import { ReportPdf } from "./ReportPdf.tsx";
 import type { ReportData } from "./ReportPdf.tsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -1540,6 +1538,11 @@ export default function App() {
     if (!reportData || exporting) return;
     setExporting(true);
     try {
+      // Lazy-load the heavy PDF renderer only when needed.
+      const [{ pdf }, { ReportPdf }] = await Promise.all([
+        import("@react-pdf/renderer"),
+        import("./ReportPdf.tsx"),
+      ]);
       const blob = await pdf(<ReportPdf data={reportData} />).toBlob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
