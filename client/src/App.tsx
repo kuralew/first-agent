@@ -165,12 +165,14 @@ function AssistantText({
   citations,
   onCitationClick,
   streaming,
+  toolRunning,
   isLast,
 }: {
   text: string;
   citations: Citation[];
   onCitationClick: (c: Citation) => void;
   streaming: boolean;
+  toolRunning: boolean;
   isLast: boolean;
 }) {
   const renderInline = (str: string) => {
@@ -224,7 +226,18 @@ function AssistantText({
       >
         {text}
       </ReactMarkdown>
-      {streaming && isLast && <span className="cursor" />}
+      {streaming && isLast && !toolRunning && <span className="cursor" />}
+      {streaming && isLast && toolRunning && (
+        <span className="thinking-label">
+          <svg className="thinking-icon" viewBox="0 0 20 20" width="15" height="15" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="10" cy="10" r="8.2" stroke="currentColor" strokeWidth="1.3" strokeDasharray="3.5 2" />
+            <circle cx="10" cy="3.2" r="1.6" fill="currentColor" />
+            <circle cx="15.7" cy="13.1" r="1.6" fill="currentColor" />
+            <circle cx="4.3" cy="13.1" r="1.6" fill="currentColor" />
+          </svg>
+          Thinking<span className="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
+        </span>
+      )}
     </div>
   );
 }
@@ -238,11 +251,14 @@ function FactsCard({
   onCitationClick: (c: Citation) => void;
 }) {
   // Parse a raw citation tag string into a Citation object for button rendering.
+  // Handles full format [d1·p4·l26·bbox:x1,y1,x2,y2] and partial [d1·p4·l26] (no bbox).
   function parseSingleTag(tag: string | undefined, fallbackId: number): Citation | null {
     if (!tag) return null;
-    const m = tag.match(/\[d(\d+)·p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/);
-    if (!m) return null;
-    return { id: fallbackId, docId: +m[1], page: +m[2], x1: +m[4], y1: +m[5], x2: +m[6], y2: +m[7], quote: "" };
+    const full = tag.match(/\[d(\d+)·p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/);
+    if (full) return { id: fallbackId, docId: +full[1], page: +full[2], x1: +full[4], y1: +full[5], x2: +full[6], y2: +full[7], quote: "" };
+    const partial = tag.match(/\[d(\d+)·p(\d+)/);
+    if (partial) return { id: fallbackId, docId: +partial[1], page: +partial[2], x1: 0, y1: 0, x2: 0, y2: 0, quote: "" };
+    return null;
   }
 
   function CitationButton({ tag, id }: { tag?: string; id: number }) {
@@ -454,9 +470,11 @@ function RisksCard({
 
   function parseSingleTag(tag: string | undefined, fallbackId: number): Citation | null {
     if (!tag) return null;
-    const m = tag.match(/\[d(\d+)·p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/);
-    if (!m) return null;
-    return { id: fallbackId, docId: +m[1], page: +m[2], x1: +m[4], y1: +m[5], x2: +m[6], y2: +m[7], quote: "" };
+    const full = tag.match(/\[d(\d+)·p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/);
+    if (full) return { id: fallbackId, docId: +full[1], page: +full[2], x1: +full[4], y1: +full[5], x2: +full[6], y2: +full[7], quote: "" };
+    const partial = tag.match(/\[d(\d+)·p(\d+)/);
+    if (partial) return { id: fallbackId, docId: +partial[1], page: +partial[2], x1: 0, y1: 0, x2: 0, y2: 0, quote: "" };
+    return null;
   }
 
   function CitationButton({ tag, id }: { tag?: string; id: number }) {
@@ -525,6 +543,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [toolRunning, setToolRunning] = useState(false);
 
   // Docs staged in the input area, not yet sent.
   const [pendingDocs, setPendingDocs] = useState<
@@ -790,6 +809,7 @@ export default function App() {
           let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; error?: string; };
           try { data = JSON.parse(part.slice(6)); } catch { continue; }
           if (data.type === "chunk") {
+            setToolRunning(false);
             rawAccum += data.text;
             const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
             if (!started) {
@@ -805,6 +825,7 @@ export default function App() {
               });
             }
           } else if (data.type === "tool") {
+            setToolRunning(true);
             setDisplayMessages((prev) => {
               const msgs = [...prev];
               const last = msgs[msgs.length - 1];
@@ -812,6 +833,7 @@ export default function App() {
               const update: Partial<DisplayMessage> = { toolLogs };
               if (data.name === "extract_key_facts" && data.input) update.extractedFacts = data.input as ExtractedFacts;
               if (data.name === "draft_document" && data.input) update.draft = data.input as DocumentDraft;
+              if (data.name === "flag_risks" && data.input) update.risks = data.input as DocumentRisks;
               return [...msgs.slice(0, -1), { ...last, ...update }];
             });
           } else if (data.type === "done") {
@@ -830,6 +852,7 @@ export default function App() {
     } finally {
       setLoading(false);
       setStreaming(false);
+      setToolRunning(false);
     }
   }
   // Keep ref current so the EventSource effect always calls the latest version.
@@ -914,6 +937,7 @@ export default function App() {
           try { data = JSON.parse(part.slice(6)); } catch { continue; }
 
           if (data.type === "chunk") {
+            setToolRunning(false);
             rawAccum += data.text;
             const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
 
@@ -933,6 +957,7 @@ export default function App() {
               });
             }
           } else if (data.type === "tool") {
+            setToolRunning(true);
             setDisplayMessages((prev) => {
               const msgs = [...prev];
               const last = msgs[msgs.length - 1];
@@ -974,6 +999,7 @@ export default function App() {
     } finally {
       setLoading(false);
       setStreaming(false);
+      setToolRunning(false);
     }
   }
 
@@ -1084,6 +1110,7 @@ export default function App() {
                       citations={msg.citations ?? []}
                       onCitationClick={handleCitationClick}
                       streaming={streaming}
+                      toolRunning={toolRunning}
                       isLast={i === displayMessages.length - 1}
                     />
                   </>
