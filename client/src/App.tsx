@@ -172,7 +172,7 @@ function AssistantText({
   citations: Citation[];
   onCitationClick: (c: Citation) => void;
   streaming: boolean;
-  toolRunning: boolean;
+  toolRunning: string | null;
   isLast: boolean;
 }) {
   const renderInline = (str: string) => {
@@ -229,13 +229,18 @@ function AssistantText({
       {streaming && isLast && !toolRunning && <span className="cursor" />}
       {streaming && isLast && toolRunning && (
         <span className="thinking-label">
-          <svg className="thinking-icon" viewBox="0 0 20 20" width="15" height="15" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg className="thinking-icon" viewBox="0 0 20 20" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg">
             <circle cx="10" cy="10" r="8.2" stroke="currentColor" strokeWidth="1.3" strokeDasharray="3.5 2" />
             <circle cx="10" cy="3.2" r="1.6" fill="currentColor" />
             <circle cx="15.7" cy="13.1" r="1.6" fill="currentColor" />
             <circle cx="4.3" cy="13.1" r="1.6" fill="currentColor" />
           </svg>
-          Thinking<span className="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
+          {({
+            extract_key_facts: "Extracting facts",
+            draft_document:    "Drafting document",
+            flag_risks:        "Flagging risks",
+          } as Record<string, string>)[toolRunning] ?? "Working"}
+          <span className="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
         </span>
       )}
     </div>
@@ -274,6 +279,19 @@ function FactsCard({
       </button>
     );
   }
+
+  // Renders plain text, converting any embedded [d1·p2·...] tags into ↗ buttons.
+  // Uses the shared citationCounter from the enclosing scope so IDs never collide.
+  const renderInlineText = (text: string) => {
+    const parts = text.split(/(\[d\d+·[^\]]+\])/g);
+    return parts.map((part, i) => {
+      if (/^\[d\d+·/.test(part)) {
+        const c = parseSingleTag(part, citationCounter++);
+        if (c) return <button key={i} className="citation-btn" onClick={() => onCitationClick(c)} title={`Jump to source — Doc ${c.docId}, page ${c.page}`}>↗</button>;
+      }
+      return <span key={i}>{part}</span>;
+    });
+  };
 
   // Group facts by category.
   const byCategory = facts.facts.reduce<Record<string, typeof facts.facts>>((acc, f) => {
@@ -333,7 +351,7 @@ function FactsCard({
           <ul className="facts-list">
             {items.map((f, i) => (
               <li key={i}>
-                <span>{f.item}</span>
+                {renderInlineText(f.item)}
                 <CitationButton tag={f.citation} id={citationCounter++} />
               </li>
             ))}
@@ -349,7 +367,7 @@ function FactsCard({
             {facts.key_dates.map((d, i) => (
               <li key={i}>
                 <span className="facts-date">{d.date}</span>
-                <span className="facts-date-desc">{d.description}</span>
+                <span className="facts-date-desc">{renderInlineText(d.description)}</span>
                 <CitationButton tag={d.citation} id={citationCounter++} />
               </li>
             ))}
@@ -365,7 +383,7 @@ function FactsCard({
             {facts.amounts.map((a, i) => (
               <li key={i}>
                 <span className="facts-amount">{a.amount}</span>
-                <span className="facts-date-desc">{a.description}</span>
+                <span className="facts-date-desc">{renderInlineText(a.description)}</span>
                 <CitationButton tag={a.citation} id={citationCounter++} />
               </li>
             ))}
@@ -491,6 +509,17 @@ function RisksCard({
     );
   }
 
+  const renderInlineText = (text: string) => {
+    const parts = text.split(/(\[d\d+·[^\]]+\])/g);
+    return parts.map((part, i) => {
+      if (/^\[d\d+·/.test(part)) {
+        const c = parseSingleTag(part, citationCounter++);
+        if (c) return <button key={i} className="citation-btn" onClick={() => onCitationClick(c)} title={`Jump to source — Doc ${c.docId}, page ${c.page}`}>↗</button>;
+      }
+      return <span key={i}>{part}</span>;
+    });
+  };
+
   let citationCounter = 9000;
 
   return (
@@ -523,10 +552,10 @@ function RisksCard({
               <span className="risk-category">{r.category}</span>
               <CitationButton tag={r.citation} id={citationCounter++} />
             </div>
-            <p className="risk-description">{r.description}</p>
+            <p className="risk-description">{renderInlineText(r.description)}</p>
             <p className="risk-recommendation">
               <span className="risk-rec-label">Recommendation: </span>
-              {r.recommendation}
+              {renderInlineText(r.recommendation)}
             </p>
           </div>
         ))}
@@ -543,7 +572,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
-  const [toolRunning, setToolRunning] = useState(false);
+  const [toolRunning, setToolRunning] = useState<string | null>(null);
 
   // Docs staged in the input area, not yet sent.
   const [pendingDocs, setPendingDocs] = useState<
@@ -809,7 +838,7 @@ export default function App() {
           let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; error?: string; };
           try { data = JSON.parse(part.slice(6)); } catch { continue; }
           if (data.type === "chunk") {
-            setToolRunning(false);
+            setToolRunning(null);
             rawAccum += data.text;
             const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
             if (!started) {
@@ -825,7 +854,7 @@ export default function App() {
               });
             }
           } else if (data.type === "tool") {
-            setToolRunning(true);
+            setToolRunning(data.name ?? null);
             setDisplayMessages((prev) => {
               const msgs = [...prev];
               const last = msgs[msgs.length - 1];
@@ -852,7 +881,7 @@ export default function App() {
     } finally {
       setLoading(false);
       setStreaming(false);
-      setToolRunning(false);
+      setToolRunning(null);
     }
   }
   // Keep ref current so the EventSource effect always calls the latest version.
@@ -937,7 +966,7 @@ export default function App() {
           try { data = JSON.parse(part.slice(6)); } catch { continue; }
 
           if (data.type === "chunk") {
-            setToolRunning(false);
+            setToolRunning(null);
             rawAccum += data.text;
             const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
 
@@ -957,7 +986,7 @@ export default function App() {
               });
             }
           } else if (data.type === "tool") {
-            setToolRunning(true);
+            setToolRunning(data.name ?? null);
             setDisplayMessages((prev) => {
               const msgs = [...prev];
               const last = msgs[msgs.length - 1];
@@ -999,7 +1028,7 @@ export default function App() {
     } finally {
       setLoading(false);
       setStreaming(false);
-      setToolRunning(false);
+      setToolRunning(null);
     }
   }
 

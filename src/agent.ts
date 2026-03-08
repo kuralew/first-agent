@@ -56,7 +56,9 @@ The draft must be ready to edit and file — not a template or placeholder. Writ
 FLAG RISKS — MANDATORY
 After calling draft_document, you MUST call flag_risks to surface legal risks in the analyzed document(s).
 Identify missing clauses, ambiguous language, liability exposure, compliance gaps, and procedural risks.
-Order risks from highest to lowest severity. Include citation tags pinpointing where each risk appears.
+Order risks from highest to lowest severity.
+Every risk MUST have a citation tag in its citation field — no exceptions, including CRITICAL risks. If a risk is based on an absent clause, cite the section nearest to where it should appear. Copy the tag exactly from the source.
+Do NOT embed citation tags inside description or recommendation text — the citation field is the only place for tags.
 Write a one-paragraph executive summary of the overall risk profile.
 
 TOOL CALL DISCIPLINE — CRITICAL
