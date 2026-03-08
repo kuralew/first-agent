@@ -8,7 +8,7 @@ import {
   Popup,
 } from "react-pdf-highlighter";
 import type { IHighlight, ScaledPosition } from "react-pdf-highlighter";
-import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, CaseListItem, SavedCase } from "./types.ts";
+import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, CaseListItem, SavedCase, DraftReview } from "./types.ts";
 import { extractTextWithBBoxes } from "./pdfExtract.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -396,21 +396,31 @@ function FactsCard({
   );
 }
 
-/** Renders a drafted document with markdown preview and .docx download. */
-function DraftCard({ draft }: { draft: DocumentDraft }) {
+/** Renders a drafted document with markdown preview, .docx download, and approve/reject review. */
+function DraftCard({
+  draft,
+  review,
+  onApprove,
+  onReject,
+}: {
+  draft: DocumentDraft;
+  review?: DraftReview;
+  onApprove?: () => void;
+  onReject?: (comment: string) => void;
+}) {
   const [expanded, setExpanded] = useState(true);
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectComment, setRejectComment] = useState("");
 
   async function downloadDocx() {
     const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import("docx");
 
     const children: InstanceType<typeof Paragraph>[] = [];
 
-    // Title
     children.push(
       new Paragraph({ text: draft.title, heading: HeadingLevel.TITLE })
     );
 
-    // Parse markdown line by line into docx paragraphs.
     for (const line of draft.content.split("\n")) {
       if (line.startsWith("## ")) {
         children.push(new Paragraph({ text: line.slice(3), heading: HeadingLevel.HEADING_2 }));
@@ -421,7 +431,6 @@ function DraftCard({ draft }: { draft: DocumentDraft }) {
       } else if (line.trim() === "") {
         children.push(new Paragraph({ text: "" }));
       } else {
-        // Handle inline **bold** spans.
         const parts = line.split(/(\*\*[^*]+\*\*)/g);
         const runs = parts.map((p) => {
           if (p.startsWith("**") && p.endsWith("**")) {
@@ -443,13 +452,28 @@ function DraftCard({ draft }: { draft: DocumentDraft }) {
     URL.revokeObjectURL(url);
   }
 
+  function submitReject() {
+    if (!rejectComment.trim()) return;
+    onReject?.(rejectComment.trim());
+    setRejecting(false);
+    setRejectComment("");
+  }
+
+  const reviewed = review && review.status !== "pending";
+
   return (
-    <div className="draft-card">
+    <div className={`draft-card${reviewed ? ` draft-card-${review!.status}` : ""}`}>
       <div className="draft-card-header">
         <div className="draft-card-title">
           <span className="draft-card-icon">✦</span>
           <span className="draft-card-type">{draft.draft_type}</span>
           <span className="draft-card-name">{draft.title}</span>
+          {review?.status === "approved" && (
+            <span className="draft-review-badge draft-review-badge-approved">✓ Approved</span>
+          )}
+          {review?.status === "rejected" && (
+            <span className="draft-review-badge draft-review-badge-rejected">↩ Revision Requested</span>
+          )}
         </div>
         <div className="draft-card-actions">
           <button className="draft-download-btn" onClick={downloadDocx} title="Download as .docx">
@@ -464,9 +488,63 @@ function DraftCard({ draft }: { draft: DocumentDraft }) {
           </button>
         </div>
       </div>
+
       {expanded && (
         <div className="draft-body">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.content}</ReactMarkdown>
+        </div>
+      )}
+
+      {/* Review actions — only shown while pending */}
+      {!reviewed && onApprove && onReject && (
+        <div className="draft-review-bar">
+          {!rejecting ? (
+            <>
+              <button className="draft-approve-btn" onClick={onApprove}>
+                ✓ Approve
+              </button>
+              <button className="draft-reject-btn" onClick={() => setRejecting(true)}>
+                ↩ Request Revision
+              </button>
+            </>
+          ) : (
+            <div className="draft-reject-form">
+              <textarea
+                className="draft-reject-textarea"
+                placeholder="Describe what needs to change…"
+                value={rejectComment}
+                onChange={(e) => setRejectComment(e.target.value)}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitReject();
+                  if (e.key === "Escape") { setRejecting(false); setRejectComment(""); }
+                }}
+              />
+              <div className="draft-reject-actions">
+                <button
+                  className="draft-reject-submit-btn"
+                  onClick={submitReject}
+                  disabled={!rejectComment.trim()}
+                >
+                  Send Feedback
+                </button>
+                <button
+                  className="draft-reject-cancel-btn"
+                  onClick={() => { setRejecting(false); setRejectComment(""); }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Show rejection comment after submission */}
+      {review?.status === "rejected" && review.comment && (
+        <div className="draft-review-comment">
+          <span className="draft-review-comment-label">Feedback sent:</span>
+          {review.comment}
         </div>
       )}
     </div>
@@ -1297,6 +1375,112 @@ export default function App() {
     }
   }
 
+  function approveDraft(msgIndex: number) {
+    setDisplayMessages((prev) => {
+      const msgs = [...prev];
+      msgs[msgIndex] = {
+        ...msgs[msgIndex],
+        draftReview: { status: "approved", timestamp: new Date().toISOString() },
+      };
+      return msgs;
+    });
+  }
+
+  async function rejectDraft(msgIndex: number, comment: string) {
+    // Mark the draft as rejected with the attorney's comment.
+    setDisplayMessages((prev) => {
+      const msgs = [...prev];
+      msgs[msgIndex] = {
+        ...msgs[msgIndex],
+        draftReview: { status: "rejected", comment, timestamp: new Date().toISOString() },
+      };
+      return msgs;
+    });
+
+    // Feed the feedback back into the conversation as a user message.
+    const feedbackMsg = `Please revise the draft based on this feedback:\n\n${comment}`;
+    setInput("");
+    setLoading(true);
+
+    try {
+      setDisplayMessages((prev) => [
+        ...prev,
+        { role: "user", text: feedbackMsg },
+      ]);
+
+      const res = await fetch("http://localhost:3001/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userMessage: feedbackMsg, history }),
+      });
+
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let started = false;
+      let rawAccum = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+          if (!part.startsWith("data: ")) continue;
+          let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; error?: string; };
+          try { data = JSON.parse(part.slice(6)); } catch { continue; }
+          if (data.type === "chunk") {
+            setToolRunning(null);
+            rawAccum += data.text;
+            const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
+            if (!started) {
+              started = true;
+              setLoading(false);
+              setStreaming(true);
+              setDisplayMessages((prev) => [...prev, { role: "assistant", text: cleanText, toolLogs: [], citations }]);
+            } else {
+              setDisplayMessages((prev) => {
+                const msgs = [...prev];
+                const last = msgs[msgs.length - 1];
+                return [...msgs.slice(0, -1), { ...last, text: cleanText, citations }];
+              });
+            }
+          } else if (data.type === "tool") {
+            setToolRunning(data.name ?? null);
+            setDisplayMessages((prev) => {
+              const msgs = [...prev];
+              const last = msgs[msgs.length - 1];
+              const toolLogs = [...(last.toolLogs ?? []), { name: data.name ?? "", input: data.input, result: data.result ?? "" }];
+              const update: Partial<DisplayMessage> = { toolLogs };
+              if (data.name === "draft_document" && data.input) update.draft = data.input as DocumentDraft;
+              if (data.name === "extract_key_facts" && data.input) update.extractedFacts = data.input as ExtractedFacts;
+              if (data.name === "flag_risks" && data.input) update.risks = data.input as DocumentRisks;
+              if (data.name === "save_legal_context" && data.input) update.legalContext = data.input as LegalContext;
+              return [...msgs.slice(0, -1), { ...last, ...update }];
+            });
+          } else if (data.type === "done") {
+            if (data.history) setHistory(data.history as unknown[]);
+          } else if (data.type === "error") {
+            throw new Error(data.error);
+          }
+        }
+      }
+
+      if (!started) {
+        setDisplayMessages((prev) => [...prev, { role: "assistant", text: "(no response)", toolLogs: [], citations: [] }]);
+      }
+    } catch (err) {
+      setDisplayMessages((prev) => [...prev, { role: "assistant", text: `Error: ${String(err)}` }]);
+    } finally {
+      setLoading(false);
+      setStreaming(false);
+      setToolRunning(null);
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -1412,7 +1596,14 @@ export default function App() {
                         onCitationClick={handleCitationClick}
                       />
                     )}
-                    {msg.draft && <DraftCard draft={msg.draft} />}
+                    {msg.draft && (
+                      <DraftCard
+                        draft={msg.draft}
+                        review={msg.draftReview}
+                        onApprove={() => approveDraft(i)}
+                        onReject={(comment) => rejectDraft(i, comment)}
+                      />
+                    )}
                     {msg.risks && (
                       <RisksCard
                         risks={msg.risks}

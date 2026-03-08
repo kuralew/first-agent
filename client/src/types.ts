@@ -64,6 +64,14 @@ export interface DocumentDraft {
   content: string;
 }
 
+export type ReviewStatus = "pending" | "approved" | "rejected";
+
+export interface DraftReview {
+  status: ReviewStatus;
+  comment?: string;
+  timestamp: string;
+}
+
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
 export interface RiskItem {
@@ -118,6 +126,7 @@ export interface DisplayMessage {
   citations?: Citation[];
   extractedFacts?: ExtractedFacts;
   draft?: DocumentDraft;
+  draftReview?: DraftReview;
   risks?: DocumentRisks;
   legalContext?: LegalContext;
   isIntake?: boolean;   // true when triggered by the file watcher, not the user
