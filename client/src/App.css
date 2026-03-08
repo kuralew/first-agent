@@ -1415,3 +1415,121 @@ body {
   font-weight: 600;
   color: #1B3A6B;
 }
+
+/* ── Legal Context Card ──────────────────────────── */
+
+.legal-card {
+  background: #F5F4FF;
+  border: 1px solid #C4B5FD;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.legal-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: #EDE9FE;
+  border-bottom: 1px solid #C4B5FD;
+}
+
+.legal-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: #4C1D95;
+  font-size: 0.85rem;
+}
+
+.legal-card-icon {
+  font-size: 1rem;
+}
+
+.legal-card-badge {
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: #6D28D9;
+  background: #DDD6FE;
+  border: 1px solid #A78BFA;
+  border-radius: 4px;
+  padding: 1px 6px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.legal-card-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #6D28D9;
+  font-size: 0.7rem;
+  padding: 2px 6px;
+}
+
+.legal-card-summary {
+  padding: 0.75rem 1rem;
+  color: #374151;
+  font-size: 0.83rem;
+  line-height: 1.6;
+  border-bottom: 1px solid #DDD6FE;
+}
+
+.legal-findings {
+  padding: 0.5rem 0;
+}
+
+.legal-finding {
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid #EDE9FE;
+}
+
+.legal-finding:last-child {
+  border-bottom: none;
+}
+
+.legal-finding-context {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #7C3AED;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.25rem;
+}
+
+.legal-finding-research {
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: #1F2937;
+  margin-bottom: 0.2rem;
+}
+
+.legal-finding-implication {
+  font-size: 0.82rem;
+  color: #4B5563;
+  line-height: 1.5;
+  margin-bottom: 0.35rem;
+}
+
+.legal-finding-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.legal-source-link {
+  font-size: 0.72rem;
+  color: #6D28D9;
+  text-decoration: none;
+  background: #EDE9FE;
+  border: 1px solid #C4B5FD;
+  border-radius: 4px;
+  padding: 1px 6px;
+  transition: background 0.15s;
+}
+
+.legal-source-link:hover {
+  background: #DDD6FE;
+}

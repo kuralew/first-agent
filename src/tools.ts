@@ -156,12 +156,124 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ["overall_risk_level", "risks", "summary"],
     },
   },
+  {
+    name: "search_legal",
+    description:
+      "Call this after flag_risks to search for relevant legal precedents, statutes, and case law related to the risks and claims identified. " +
+      "Derive 2–4 targeted search queries from the document's specific legal issues — use precise legal terminology. " +
+      "The results are supplemental external context only — they never replace or modify the document-grounded analysis.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        queries: {
+          type: "array",
+          description: "2–4 targeted legal search queries derived from the document's specific issues",
+          items: { type: "string" },
+          minItems: 1,
+          maxItems: 4,
+        },
+        context: {
+          type: "string",
+          description: "Brief explanation of why these queries are relevant to the document analysis",
+        },
+      },
+      required: ["queries", "context"],
+    },
+  },
+  {
+    name: "save_legal_context",
+    description:
+      "Call this after search_legal to save synthesized legal research findings. " +
+      "Based on the search results, identify the most relevant precedents, statutes, and doctrines. " +
+      "This is strictly external context — do not use it to allege facts or modify the document analysis. " +
+      "Each finding must clearly state what it is and how it relates to the document's issues.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        summary: {
+          type: "string",
+          description: "One-paragraph overview of what the legal research revealed and its relevance",
+        },
+        findings: {
+          type: "array",
+          description: "Individual legal research findings — precedents, statutes, doctrines",
+          items: {
+            type: "object",
+            properties: {
+              claim_context: {
+                type: "string",
+                description: "The specific claim or risk from the document this finding relates to",
+              },
+              research: {
+                type: "string",
+                description: "The legal precedent, statute, or doctrine found (case name, citation, or statute reference)",
+              },
+              implication: {
+                type: "string",
+                description: "How this finding is relevant — what it means for counsel's strategy",
+              },
+              sources: {
+                type: "array",
+                description: "Source URLs from the search results",
+                items: { type: "string" },
+              },
+            },
+            required: ["claim_context", "research", "implication"],
+          },
+        },
+      },
+      required: ["summary", "findings"],
+    },
+  },
 ];
 
-export function executeTool(
+async function performLegalSearch(queries: string[]): Promise<string> {
+  const apiKey = process.env.BRAVE_API_KEY;
+  if (!apiKey) {
+    return JSON.stringify({ error: "BRAVE_API_KEY not configured. Add it to your .env file." });
+  }
+
+  const results: Array<{ query: string; hits: Array<{ title: string; url: string; description: string }> }> = [];
+
+  for (const query of queries) {
+    try {
+      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5&result_filter=web`;
+      const resp = await fetch(url, {
+        headers: {
+          "Accept": "application/json",
+          "Accept-Encoding": "gzip",
+          "X-Subscription-Token": apiKey,
+        },
+      });
+
+      if (!resp.ok) {
+        results.push({ query, hits: [] });
+        continue;
+      }
+
+      const data = await resp.json() as {
+        web?: { results?: Array<{ title: string; url: string; description?: string }> };
+      };
+
+      const hits = (data.web?.results ?? []).slice(0, 5).map((r) => ({
+        title: r.title,
+        url: r.url,
+        description: r.description ?? "",
+      }));
+
+      results.push({ query, hits });
+    } catch {
+      results.push({ query, hits: [] });
+    }
+  }
+
+  return JSON.stringify(results, null, 2);
+}
+
+export async function executeTool(
   name: string,
   input: Record<string, unknown>
-): string {
+): Promise<string> {
   switch (name) {
     case "extract_key_facts":
       return `Extracted facts recorded: ${(input.facts as unknown[])?.length ?? 0} facts, ${(input.parties as unknown[])?.length ?? 0} parties.`;
@@ -171,6 +283,17 @@ export function executeTool(
 
     case "flag_risks":
       return `Risks recorded: ${(input.risks as unknown[])?.length ?? 0} risks flagged (overall: ${input.overall_risk_level}).`;
+
+    case "search_legal": {
+      const queries = input.queries as string[];
+      console.log(`  [search_legal] Searching ${queries.length} queries via Brave…`);
+      return await performLegalSearch(queries);
+    }
+
+    case "save_legal_context": {
+      const findings = (input.findings as unknown[])?.length ?? 0;
+      return `Legal context recorded: ${findings} findings.`;
+    }
 
     default:
       return `Unknown tool: ${name}`;
