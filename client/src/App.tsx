@@ -8,7 +8,7 @@ import {
   Popup,
 } from "react-pdf-highlighter";
 import type { IHighlight, ScaledPosition } from "react-pdf-highlighter";
-import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft } from "./types.ts";
+import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel } from "./types.ts";
 import { extractTextWithBBoxes } from "./pdfExtract.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -433,6 +433,86 @@ function DraftCard({ draft }: { draft: DocumentDraft }) {
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.content}</ReactMarkdown>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Renders the flagged risks card. */
+function RisksCard({
+  risks,
+  onCitationClick,
+}: {
+  risks: DocumentRisks;
+  onCitationClick: (c: Citation) => void;
+}) {
+  const LEVEL_COLOR: Record<RiskLevel, string> = {
+    LOW: "#2E7D32",
+    MEDIUM: "#E65100",
+    HIGH: "#B71C1C",
+    CRITICAL: "#6A0000",
+  };
+
+  function parseSingleTag(tag: string | undefined, fallbackId: number): Citation | null {
+    if (!tag) return null;
+    const m = tag.match(/\[d(\d+)·p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/);
+    if (!m) return null;
+    return { id: fallbackId, docId: +m[1], page: +m[2], x1: +m[4], y1: +m[5], x2: +m[6], y2: +m[7], quote: "" };
+  }
+
+  function CitationButton({ tag, id }: { tag?: string; id: number }) {
+    const c = parseSingleTag(tag, id);
+    if (!c) return null;
+    return (
+      <button
+        className="citation-btn"
+        onClick={() => onCitationClick(c)}
+        title={`Jump to source — Doc ${c.docId}, page ${c.page}`}
+      >
+        ↗
+      </button>
+    );
+  }
+
+  let citationCounter = 9000;
+
+  return (
+    <div className="risks-card">
+      <div className="risks-card-header">
+        <div className="risks-card-title">
+          <span className="risks-card-icon">⚠</span>
+          <span>Risk Assessment</span>
+          <span
+            className="risks-overall-badge"
+            style={{ background: LEVEL_COLOR[risks.overall_risk_level] }}
+          >
+            {risks.overall_risk_level}
+          </span>
+        </div>
+      </div>
+
+      <p className="risks-summary">{risks.summary}</p>
+
+      <div className="risks-list">
+        {risks.risks.map((r, i) => (
+          <div key={i} className="risk-item" data-severity={r.severity}>
+            <div className="risk-item-header">
+              <span
+                className="risk-severity"
+                style={{ color: LEVEL_COLOR[r.severity] }}
+              >
+                {r.severity}
+              </span>
+              <span className="risk-category">{r.category}</span>
+              <CitationButton tag={r.citation} id={citationCounter++} />
+            </div>
+            <p className="risk-description">{r.description}</p>
+            <p className="risk-recommendation">
+              <span className="risk-rec-label">Recommendation: </span>
+              {r.recommendation}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -867,6 +947,9 @@ export default function App() {
               if (data.name === "draft_document" && data.input) {
                 update.draft = data.input as DocumentDraft;
               }
+              if (data.name === "flag_risks" && data.input) {
+                update.risks = data.input as DocumentRisks;
+              }
               return [...msgs.slice(0, -1), { ...last, ...update }];
             });
           } else if (data.type === "done") {
@@ -990,6 +1073,12 @@ export default function App() {
                       />
                     )}
                     {msg.draft && <DraftCard draft={msg.draft} />}
+                    {msg.risks && (
+                      <RisksCard
+                        risks={msg.risks}
+                        onCitationClick={handleCitationClick}
+                      />
+                    )}
                     <AssistantText
                       text={msg.text}
                       citations={msg.citations ?? []}

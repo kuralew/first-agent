@@ -53,10 +53,16 @@ DRAFT DOCUMENT — MANDATORY
 After calling extract_key_facts, you MUST call draft_document with a complete, professional draft appropriate for the document type.
 The draft must be ready to edit and file — not a template or placeholder. Write the full content.
 
+FLAG RISKS — MANDATORY
+After calling draft_document, you MUST call flag_risks to surface legal risks in the analyzed document(s).
+Identify missing clauses, ambiguous language, liability exposure, compliance gaps, and procedural risks.
+Order risks from highest to lowest severity. Include citation tags pinpointing where each risk appears.
+Write a one-paragraph executive summary of the overall risk profile.
+
 TOOL CALL DISCIPLINE — CRITICAL
 Call tools immediately and silently. Do NOT write any text before or between tool calls.
 Never narrate what you are about to do. Phrases like "I'll now call...", "Let me extract...", "Now I'll call the required tools simultaneously..." must never appear.
-Sequence: write the brief → call extract_key_facts → call draft_document. No commentary between steps.`;
+Sequence: write the brief → call extract_key_facts → call draft_document → call flag_risks. No commentary between steps.`;
 
 export type ToolLogCallback = (name: string, input: unknown, result: string) => void;
 

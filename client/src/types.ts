@@ -64,6 +64,22 @@ export interface DocumentDraft {
   content: string;
 }
 
+export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export interface RiskItem {
+  severity: RiskLevel;
+  category: string;
+  description: string;
+  recommendation: string;
+  citation?: string;
+}
+
+export interface DocumentRisks {
+  overall_risk_level: RiskLevel;
+  risks: RiskItem[];
+  summary: string;
+}
+
 export interface DisplayMessage {
   role: "user" | "assistant";
   text: string;
@@ -72,5 +88,6 @@ export interface DisplayMessage {
   citations?: Citation[];
   extractedFacts?: ExtractedFacts;
   draft?: DocumentDraft;
+  risks?: DocumentRisks;
   isIntake?: boolean;   // true when triggered by the file watcher, not the user
 }
