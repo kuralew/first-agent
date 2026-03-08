@@ -104,6 +104,58 @@ export const toolDefinitions: Anthropic.Tool[] = [
       required: ["draft_type", "title", "content"],
     },
   },
+  {
+    name: "flag_risks",
+    description:
+      "Call this after draft_document to identify legal risks in the analyzed document(s). " +
+      "Surface missing clauses, ambiguous language, liability exposure, compliance gaps, and any red flags a lawyer should address. " +
+      "Include citation tags pinpointing where each risk appears in the source.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        overall_risk_level: {
+          type: "string",
+          enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+          description: "Overall risk assessment for this document or set of documents",
+        },
+        risks: {
+          type: "array",
+          description: "Individual risks, ordered from highest to lowest severity",
+          items: {
+            type: "object",
+            properties: {
+              severity: {
+                type: "string",
+                enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+              },
+              category: {
+                type: "string",
+                description: "e.g. 'Missing Clause', 'Ambiguous Language', 'Liability Exposure', 'Compliance Gap', 'Procedural Risk'",
+              },
+              description: {
+                type: "string",
+                description: "What the risk is and why it matters",
+              },
+              recommendation: {
+                type: "string",
+                description: "Specific action counsel should take to address it",
+              },
+              citation: {
+                type: "string",
+                description: "Citation tag from the source line where this risk appears",
+              },
+            },
+            required: ["severity", "category", "description", "recommendation"],
+          },
+        },
+        summary: {
+          type: "string",
+          description: "One-paragraph executive summary of the overall risk profile",
+        },
+      },
+      required: ["overall_risk_level", "risks", "summary"],
+    },
+  },
 ];
 
 export function executeTool(
@@ -116,6 +168,9 @@ export function executeTool(
 
     case "draft_document":
       return `Draft recorded: "${input.title}" (${input.draft_type}).`;
+
+    case "flag_risks":
+      return `Risks recorded: ${(input.risks as unknown[])?.length ?? 0} risks flagged (overall: ${input.overall_risk_level}).`;
 
     default:
       return `Unknown tool: ${name}`;

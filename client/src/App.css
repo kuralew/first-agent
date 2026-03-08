@@ -1230,6 +1230,42 @@ body {
   background: rgba(0, 0, 0, 0.015);
 }
 
+/* ── Thinking indicator ──────────────────────────── */
+
+.thinking-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: #7c3aed;
+  font-style: italic;
+  margin-left: 0.3rem;
+  vertical-align: middle;
+}
+
+.thinking-icon {
+  color: #7c3aed;
+  flex-shrink: 0;
+  animation: thinking-rotate 2.4s linear infinite;
+}
+
+@keyframes thinking-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.thinking-dots span {
+  animation: thinking-blink 1.4s ease-in-out infinite;
+  opacity: 0;
+}
+.thinking-dots span:nth-child(2) { animation-delay: 0.22s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.44s; }
+
+@keyframes thinking-blink {
+  0%, 60%, 100% { opacity: 0; }
+  30% { opacity: 1; }
+}
+
 /* ── Intake pipeline ─────────────────────────────── */
 
 .intake-notification {
@@ -1279,4 +1315,103 @@ body {
   align-items: center;
   gap: 0.3rem;
   margin-bottom: 0.4rem;
+}
+
+/* ── Risks card ──────────────────────────────────── */
+
+.risks-card {
+  border: 1px solid rgba(183, 28, 28, 0.18);
+  border-radius: 10px;
+  background: #fff;
+  margin-bottom: 0.75rem;
+  overflow: hidden;
+  font-size: 0.82rem;
+}
+
+.risks-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 1rem;
+  background: rgba(183, 28, 28, 0.04);
+  border-bottom: 1px solid rgba(183, 28, 28, 0.12);
+}
+
+.risks-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: #1A1A1A;
+  font-size: 0.85rem;
+}
+
+.risks-card-icon {
+  font-size: 1rem;
+  color: #B71C1C;
+}
+
+.risks-overall-badge {
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+}
+
+.risks-summary {
+  padding: 0.75rem 1rem;
+  color: #444;
+  line-height: 1.55;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+
+.risks-list {
+  padding: 0.5rem 0;
+}
+
+.risk-item {
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+
+.risk-item:last-child {
+  border-bottom: none;
+}
+
+.risk-item-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.risk-severity {
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  min-width: 3.5rem;
+}
+
+.risk-category {
+  font-weight: 600;
+  color: #1A1A1A;
+  flex: 1;
+}
+
+.risk-description {
+  color: #444;
+  line-height: 1.5;
+  margin-bottom: 0.3rem;
+}
+
+.risk-recommendation {
+  color: #555;
+  line-height: 1.5;
+}
+
+.risk-rec-label {
+  font-weight: 600;
+  color: #1B3A6B;
 }
