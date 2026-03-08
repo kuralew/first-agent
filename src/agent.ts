@@ -61,10 +61,20 @@ Every risk MUST have a citation tag in its citation field — no exceptions, inc
 Do NOT embed citation tags inside description or recommendation text — the citation field is the only place for tags.
 Write a one-paragraph executive summary of the overall risk profile.
 
+LEGAL RESEARCH — MANDATORY
+After calling flag_risks, you MUST call search_legal to find relevant legal precedents, statutes, and case law.
+Derive 2–4 targeted queries from the document's specific legal claims, violations, or risks — use precise legal terminology (e.g. "FTC Section 5 unfair practices gig economy", "worker misclassification ABC test California").
+After receiving the search results, you MUST call save_legal_context with synthesized findings.
+CRITICAL CONSTRAINT: Legal research is strictly supplemental external context. Rules:
+- Do NOT use research to allege new facts about the document.
+- Do NOT modify or re-characterize the document-grounded analysis based on research.
+- Do NOT cite research sources with document citation tags — research findings have no [d·p·l] tags.
+- Research appears in a separate "External Research" section, never mixed into the document brief.
+
 TOOL CALL DISCIPLINE — CRITICAL
 Call tools immediately and silently. Do NOT write any text before or between tool calls.
 Never narrate what you are about to do. Phrases like "I'll now call...", "Let me extract...", "Now I'll call the required tools simultaneously..." must never appear.
-Sequence: write the brief → call extract_key_facts → call draft_document → call flag_risks. No commentary between steps.`;
+Sequence: write the brief → call extract_key_facts → call draft_document → call flag_risks → call search_legal → call save_legal_context. No commentary between steps.`;
 
 export type ToolLogCallback = (name: string, input: unknown, result: string) => void;
 
@@ -102,7 +112,7 @@ export async function runAgentStream(
       for (const block of final.content) {
         if (block.type !== "tool_use") continue;
 
-        const result = executeTool(
+        const result = await executeTool(
           block.name,
           block.input as Record<string, unknown>
         );
@@ -158,7 +168,7 @@ export async function runAgent(
       for (const block of response.content) {
         if (block.type !== "tool_use") continue;
 
-        const result = executeTool(
+        const result = await executeTool(
           block.name,
           block.input as Record<string, unknown>
         );

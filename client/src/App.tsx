@@ -8,7 +8,7 @@ import {
   Popup,
 } from "react-pdf-highlighter";
 import type { IHighlight, ScaledPosition } from "react-pdf-highlighter";
-import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel } from "./types.ts";
+import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext } from "./types.ts";
 import { extractTextWithBBoxes } from "./pdfExtract.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -236,9 +236,11 @@ function AssistantText({
             <circle cx="4.3" cy="13.1" r="1.6" fill="currentColor" />
           </svg>
           {({
-            extract_key_facts: "Extracting facts",
-            draft_document:    "Drafting document",
-            flag_risks:        "Flagging risks",
+            extract_key_facts:   "Extracting facts",
+            draft_document:      "Drafting document",
+            flag_risks:          "Flagging risks",
+            search_legal:        "Searching legal precedents",
+            save_legal_context:  "Saving legal context",
           } as Record<string, string>)[toolRunning] ?? "Working"}
           <span className="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
         </span>
@@ -564,6 +566,54 @@ function RisksCard({
   );
 }
 
+/** Renders legal research findings as a clearly-labeled external research card. */
+function LegalContextCard({ context }: { context: LegalContext }) {
+  const [expanded, setExpanded] = useState(true);
+
+  return (
+    <div className="legal-card">
+      <div className="legal-card-header">
+        <div className="legal-card-title">
+          <span className="legal-card-icon">⚖</span>
+          <span>External Research</span>
+          <span className="legal-card-badge">Supplemental — not document-grounded</span>
+        </div>
+        <button
+          className="legal-card-toggle"
+          onClick={() => setExpanded((e) => !e)}
+          aria-label={expanded ? "Collapse" : "Expand"}
+        >
+          {expanded ? "▲" : "▼"}
+        </button>
+      </div>
+
+      {expanded && (
+        <>
+          <p className="legal-card-summary">{context.summary}</p>
+          <div className="legal-findings">
+            {context.findings.map((f, i) => (
+              <div key={i} className="legal-finding">
+                <div className="legal-finding-context">{f.claim_context}</div>
+                <div className="legal-finding-research">{f.research}</div>
+                <div className="legal-finding-implication">{f.implication}</div>
+                {f.sources && f.sources.length > 0 && (
+                  <div className="legal-finding-sources">
+                    {f.sources.map((src, j) => (
+                      <a key={j} href={src} target="_blank" rel="noopener noreferrer" className="legal-source-link">
+                        {j + 1}. {src.replace(/^https?:\/\//, "").split("/")[0]}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -863,6 +913,7 @@ export default function App() {
               if (data.name === "extract_key_facts" && data.input) update.extractedFacts = data.input as ExtractedFacts;
               if (data.name === "draft_document" && data.input) update.draft = data.input as DocumentDraft;
               if (data.name === "flag_risks" && data.input) update.risks = data.input as DocumentRisks;
+              if (data.name === "save_legal_context" && data.input) update.legalContext = data.input as LegalContext;
               return [...msgs.slice(0, -1), { ...last, ...update }];
             });
           } else if (data.type === "done") {
@@ -1004,6 +1055,9 @@ export default function App() {
               if (data.name === "flag_risks" && data.input) {
                 update.risks = data.input as DocumentRisks;
               }
+              if (data.name === "save_legal_context" && data.input) {
+                update.legalContext = data.input as LegalContext;
+              }
               return [...msgs.slice(0, -1), { ...last, ...update }];
             });
           } else if (data.type === "done") {
@@ -1133,6 +1187,9 @@ export default function App() {
                         risks={msg.risks}
                         onCitationClick={handleCitationClick}
                       />
+                    )}
+                    {msg.legalContext && (
+                      <LegalContextCard context={msg.legalContext} />
                     )}
                     <AssistantText
                       text={msg.text}

@@ -80,6 +80,24 @@ export interface DocumentRisks {
   summary: string;
 }
 
+export interface LegalSource {
+  title: string;
+  url: string;
+  description: string;
+}
+
+export interface LegalFinding {
+  claim_context: string;
+  research: string;
+  implication: string;
+  sources?: string[];
+}
+
+export interface LegalContext {
+  summary: string;
+  findings: LegalFinding[];
+}
+
 export interface DisplayMessage {
   role: "user" | "assistant";
   text: string;
@@ -89,5 +107,6 @@ export interface DisplayMessage {
   extractedFacts?: ExtractedFacts;
   draft?: DocumentDraft;
   risks?: DocumentRisks;
+  legalContext?: LegalContext;
   isIntake?: boolean;   // true when triggered by the file watcher, not the user
 }
