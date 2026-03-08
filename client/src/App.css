@@ -1373,6 +1373,147 @@ body {
   background: rgba(0, 0, 0, 0.015);
 }
 
+/* ── Draft review bar ───────────────────────────── */
+
+.draft-card-approved {
+  border-color: #A7F3D0;
+}
+
+.draft-card-rejected {
+  border-color: #FCA5A5;
+}
+
+.draft-review-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 2px 7px;
+  letter-spacing: 0.03em;
+}
+
+.draft-review-badge-approved {
+  background: #D1FAE5;
+  color: #065F46;
+  border: 1px solid #6EE7B7;
+}
+
+.draft-review-badge-rejected {
+  background: #FEE2E2;
+  color: #991B1B;
+  border: 1px solid #FCA5A5;
+}
+
+.draft-review-bar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.65rem 1rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+  background: #FAFAFA;
+}
+
+.draft-approve-btn {
+  padding: 0.35rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid #6EE7B7;
+  background: #D1FAE5;
+  color: #065F46;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.draft-approve-btn:hover {
+  background: #A7F3D0;
+}
+
+.draft-reject-btn {
+  padding: 0.35rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid #FCA5A5;
+  background: #FEE2E2;
+  color: #991B1B;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.draft-reject-btn:hover {
+  background: #FECACA;
+}
+
+.draft-reject-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.draft-reject-textarea {
+  width: 100%;
+  min-height: 64px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #FCA5A5;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  background: #FFF5F5;
+}
+
+.draft-reject-textarea:focus {
+  border-color: #F87171;
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.15);
+}
+
+.draft-reject-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.draft-reject-submit-btn {
+  padding: 0.3rem 0.8rem;
+  border-radius: 6px;
+  border: none;
+  background: #991B1B;
+  color: white;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.draft-reject-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.draft-reject-cancel-btn {
+  padding: 0.3rem 0.8rem;
+  border-radius: 6px;
+  border: 1px solid #D1D5DB;
+  background: white;
+  color: #374151;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.draft-review-comment {
+  padding: 0.5rem 1rem 0.65rem;
+  background: #FEF2F2;
+  border-top: 1px solid #FECACA;
+  font-size: 0.8rem;
+  color: #7F1D1D;
+  line-height: 1.5;
+}
+
+.draft-review-comment-label {
+  font-weight: 600;
+  margin-right: 0.35rem;
+}
+
 /* ── Thinking indicator ──────────────────────────── */
 
 .thinking-label {
