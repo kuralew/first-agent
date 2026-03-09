@@ -729,13 +729,13 @@ export default function App() {
   }, [input]);
 
   useEffect(() => {
-    const es = new EventSource("http://localhost:3001/events");
+    const es = new EventSource("/events");
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
         if (data.type === "new_document") {
           setIntakeNotification(data.filename);
-          intakeAnalyzeRef.current?.(data.filename, `http://localhost:3001${data.url}`);
+          intakeAnalyzeRef.current?.(data.filename, `${data.url}`);
         }
       } catch { /* ignore malformed events */ }
     };
@@ -887,7 +887,7 @@ export default function App() {
 
   async function fetchCases() {
     try {
-      const res = await fetch("http://localhost:3001/cases");
+      const res = await fetch("/cases");
       if (res.ok) setCases(await res.json());
     } catch { /* server may not be running */ }
   }
@@ -909,14 +909,14 @@ export default function App() {
       if (!doc.url.startsWith("blob:")) continue;
       try {
         const blob = await fetch(doc.url).then((r) => r.blob());
-        const res = await fetch(`http://localhost:3001/cases/${id}/docs`, {
+        const res = await fetch(`/cases/${id}/docs`, {
           method: "POST",
           headers: { "Content-Type": "application/pdf", "x-filename": doc.name },
           body: blob,
         });
         if (res.ok) {
           const { url } = await res.json();
-          urlMap.set(doc.url, `http://localhost:3001${url}`);
+          urlMap.set(doc.url, `${url}`);
         }
       } catch { /* ignore */ }
     }
@@ -928,7 +928,7 @@ export default function App() {
       })),
     }));
     try {
-      await fetch(`http://localhost:3001/cases/${id}`, {
+      await fetch(`/cases/${id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, history: hist, displayMessages: serialized }),
@@ -981,7 +981,7 @@ export default function App() {
     };
 
     try {
-      await fetch("http://localhost:3001/memories", {
+      await fetch("/memories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(memory),
@@ -991,7 +991,7 @@ export default function App() {
 
   async function loadCase(id: string) {
     try {
-      const res = await fetch(`http://localhost:3001/cases/${id}`);
+      const res = await fetch(`/cases/${id}`);
       if (!res.ok) return;
       const data: SavedCase = await res.json();
       setActiveCaseId(data.id);
@@ -1017,7 +1017,7 @@ export default function App() {
 
   async function deleteCase(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    await fetch(`http://localhost:3001/cases/${id}`, { method: "DELETE" });
+    await fetch(`/cases/${id}`, { method: "DELETE" });
     if (activeCaseIdRef.current === id) startNewCase();
     fetchCases();
   }
@@ -1063,7 +1063,7 @@ export default function App() {
         { role: "user", text: `Analyze: ${filename}`, docs: [newDoc], isIntake: true },
       ]);
 
-      const res = await fetch("http://localhost:3001/chat/stream", {
+      const res = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1126,7 +1126,7 @@ export default function App() {
         },
       ]);
 
-      const res = await fetch("http://localhost:3001/chat/stream", {
+      const res = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1177,7 +1177,7 @@ export default function App() {
     try {
       setDisplayMessages((prev) => [...prev, { role: "user", text: feedbackMsg }]);
 
-      const res = await fetch("http://localhost:3001/chat/stream", {
+      const res = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userMessage: feedbackMsg, history }),
@@ -1207,7 +1207,7 @@ export default function App() {
     try {
       setDisplayMessages((prev) => [...prev, { role: "user", text: answer }]);
 
-      const res = await fetch("http://localhost:3001/chat/stream", {
+      const res = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userMessage: answer, history }),
