@@ -21,7 +21,8 @@ app.use(
 
 // ── Intake inbox ─────────────────────────────────────────────────────────────
 
-const inboxDir = path.join(__dirname, "../inbox");
+// Use the sibling-level inbox (C:/repos/inbox) — that is where users drop files.
+const inboxDir = path.join(__dirname, "../../inbox");
 if (!fs.existsSync(inboxDir)) fs.mkdirSync(inboxDir, { recursive: true });
 
 // Serve inbox PDFs so the client can load them for extraction.
@@ -32,7 +33,14 @@ const sseClients = new Set<express.Response>();
 
 function broadcast(data: object) {
   const msg = `data: ${JSON.stringify(data)}\n\n`;
-  for (const client of sseClients) client.write(msg);
+  for (const client of sseClients) {
+    try {
+      client.write(msg);
+    } catch (err) {
+      console.warn("[sse] Dead client removed:", err);
+      sseClients.delete(client);
+    }
+  }
 }
 
 // Persistent SSE endpoint — client connects once on mount and listens.
@@ -42,17 +50,24 @@ app.get("/events", (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
   sseClients.add(res);
-  req.on("close", () => sseClients.delete(res));
+  console.log(`[sse] Client connected. Total: ${sseClients.size}`);
+  req.on("close", () => {
+    sseClients.delete(res);
+    console.log(`[sse] Client disconnected. Total: ${sseClients.size}`);
+  });
 });
 
-// Watch inbox — when a PDF drops, broadcast to all connected clients.
+// Watch inbox — when a PDF drops (new file or overwrite), broadcast to all connected clients.
+function handleInboxFile(filePath: string) {
+  if (!filePath.toLowerCase().endsWith(".pdf")) return;
+  const filename = path.basename(filePath);
+  console.log(`[intake] Document detected: ${filename}`);
+  broadcast({ type: "new_document", filename, url: `/inbox/${encodeURIComponent(filename)}` });
+}
+
 watch(inboxDir, { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 1200 } })
-  .on("add", (filePath) => {
-    if (!filePath.toLowerCase().endsWith(".pdf")) return;
-    const filename = path.basename(filePath);
-    console.log(`[intake] New document detected: ${filename}`);
-    broadcast({ type: "new_document", filename, url: `/inbox/${encodeURIComponent(filename)}` });
-  });
+  .on("add", handleInboxFile)
+  .on("change", handleInboxFile);
 
 // ── Case memory ──────────────────────────────────────────────────────────────
 
@@ -318,6 +333,14 @@ app.post("/chat/stream", async (req, res) => {
   } finally {
     res.end();
   }
+});
+
+// Debug: manually trigger a broadcast to test SSE end-to-end
+app.get("/debug/test-intake", (_req, res) => {
+  const connected = sseClients.size;
+  broadcast({ type: "new_document", filename: "debug-test.pdf", url: "/inbox/employment-contract-1-stma.pdf" });
+  console.log(`[debug] Manual broadcast sent to ${connected} client(s)`);
+  res.json({ ok: true, clientsNotified: connected });
 });
 
 // Serve built client in production

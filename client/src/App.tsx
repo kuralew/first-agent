@@ -708,6 +708,8 @@ export default function App() {
   useEffect(() => { historyRef.current = history; }, [history]);
 
   const intakeAnalyzeRef = useRef<((filename: string, url: string) => Promise<void>) | null>(null);
+  const intakeAnalyzeFileRef = useRef<((file: File) => Promise<void>) | null>(null);
+  const intakeQueueRef = useRef<Array<{ filename: string; url: string }>>([]);
 
   const { processStream } = useStreamProcessor({
     setDisplayMessages,
@@ -729,15 +731,21 @@ export default function App() {
   }, [input]);
 
   useEffect(() => {
-    const es = new EventSource("/events");
+    // In dev, bypass Vite proxy (which buffers SSE) and connect directly.
+    // Server CORS allows all localhost ports. In prod, same origin so /events works.
+    const eventsUrl = import.meta.env.DEV ? "http://localhost:3001/events" : "/events";
+    const es = new EventSource(eventsUrl);
+    es.onopen = () => console.log("[sse] Connected to", eventsUrl);
+    es.onerror = (e) => console.error("[sse] Error:", e);
     es.onmessage = (e) => {
+      console.log("[sse] Message:", e.data);
       try {
         const data = JSON.parse(e.data);
         if (data.type === "new_document") {
           setIntakeNotification(data.filename);
           intakeAnalyzeRef.current?.(data.filename, `${data.url}`);
         }
-      } catch { /* ignore malformed events */ }
+      } catch (err) { console.error("[sse] Handler error:", err); }
     };
     return () => es.close();
   }, []);
@@ -863,6 +871,26 @@ export default function App() {
     const newDocs = files.map((file) => ({ file, name: file.name, url: URL.createObjectURL(file) }));
     setPendingDocs((prev) => [...prev, ...newDocs]);
     e.target.value = "";
+  }
+
+  const [dragOver, setDragOver] = useState(false);
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(true);
+  }
+
+  function handleDragLeave() {
+    setDragOver(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type === "application/pdf");
+    if (!files.length) return;
+    // Immediately run intake analysis on dropped files.
+    files.forEach((file) => intakeAnalyzeFileRef.current?.(file));
   }
 
   function removePendingDoc(index: number) {
@@ -1038,7 +1066,10 @@ export default function App() {
   }
 
   async function intakeAnalyze(filename: string, serverUrl: string) {
-    if (loading) return;
+    if (loading) {
+      intakeQueueRef.current.push({ filename, url: serverUrl });
+      return;
+    }
     if (!activeCaseIdRef.current) {
       const newId = `case_${Date.now()}`;
       setActiveCaseId(newId);
@@ -1080,9 +1111,59 @@ export default function App() {
       setLoading(false);
       setStreaming(false);
       setToolRunning(null);
+      // Process any queued intake events that arrived while busy.
+      const next = intakeQueueRef.current.shift();
+      if (next) intakeAnalyzeRef.current?.(next.filename, next.url);
     }
   }
   intakeAnalyzeRef.current = intakeAnalyze;
+
+  // Takes a File object directly (browser drag-and-drop) — no server fetch needed.
+  async function intakeAnalyzeFile(file: File) {
+    if (loading) {
+      intakeQueueRef.current.push({ filename: file.name, url: URL.createObjectURL(file) });
+      return;
+    }
+    if (!activeCaseIdRef.current) {
+      const newId = `case_${Date.now()}`;
+      setActiveCaseId(newId);
+      activeCaseIdRef.current = newId;
+    }
+    setLoading(true);
+    try {
+      const objectUrl = URL.createObjectURL(file);
+      const { text: rawText, pageDims } = await extractPdfText(file);
+      const docId = nextDocIdRef.current;
+      const prefixedText = rawText.replace(/^\[p/gm, `[d${docId}\u00B7p`);
+      const newDoc: DocInfo = { id: docId, name: file.name, url: objectUrl, pageDims };
+      setSessionDocs((prev) => [...prev, newDoc]);
+      setNextDocId(docId + 1);
+      setDisplayMessages((prev) => [
+        ...prev,
+        { role: "user", text: `Analyze: ${file.name}`, docs: [newDoc], isIntake: true },
+      ]);
+      const res = await fetch("/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userMessage: `Please analyze this document: ${file.name}`,
+          history: historyRef.current,
+          docText: `=== Document ${docId}: ${file.name} ===\n${prefixedText.trim()}\n\n`,
+        }),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      await processStream(res);
+    } catch (err) {
+      setDisplayMessages((prev) => [...prev, { role: "assistant", text: `Intake error: ${String(err)}` }]);
+    } finally {
+      setLoading(false);
+      setStreaming(false);
+      setToolRunning(null);
+      const next = intakeQueueRef.current.shift();
+      if (next) intakeAnalyzeRef.current?.(next.filename, next.url);
+    }
+  }
+  intakeAnalyzeFileRef.current = intakeAnalyzeFile;
 
   async function send() {
     const text = input.trim();
@@ -1493,7 +1574,12 @@ export default function App() {
               ))}
             </div>
           )}
-          <div className="input-card">
+          <div
+            className={`input-card${dragOver ? " drag-over" : ""}`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
             <input
               ref={fileInputRef}
               type="file"
