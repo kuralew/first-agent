@@ -9,7 +9,7 @@ import {
   Popup,
 } from "react-pdf-highlighter";
 import type { IHighlight, ScaledPosition } from "react-pdf-highlighter";
-import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, CaseListItem, SavedCase, DraftReview } from "./types.ts";
+import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, CaseListItem, SavedCase, DraftReview, ClarificationRequest } from "./types.ts";
 import { extractTextWithBBoxes } from "./pdfExtract.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -237,11 +237,13 @@ function AssistantText({
             <circle cx="4.3" cy="13.1" r="1.6" fill="currentColor" />
           </svg>
           {({
-            extract_key_facts:   "Extracting facts",
-            draft_document:      "Drafting document",
-            flag_risks:          "Flagging risks",
-            search_legal:        "Searching legal precedents",
-            save_legal_context:  "Saving legal context",
+            extract_key_facts:     "Extracting facts",
+            draft_document:        "Drafting document",
+            flag_risks:            "Flagging risks",
+            search_legal:          "Searching legal precedents",
+            save_legal_context:    "Saving legal context",
+            assess_quality:        "Reviewing quality",
+            request_clarification: "Requesting clarification",
           } as Record<string, string>)[toolRunning] ?? "Working"}
           <span className="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
         </span>
@@ -688,6 +690,62 @@ function LegalContextCard({ context }: { context: LegalContext }) {
             ))}
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+/** Renders a clarification request with an inline answer input. */
+function ClarificationCard({
+  clarification,
+  onAnswer,
+}: {
+  clarification: ClarificationRequest;
+  onAnswer: (answer: string) => void;
+}) {
+  const [answer, setAnswer] = useState(clarification.answer ?? "");
+  const answered = !!clarification.answer;
+
+  function submit() {
+    const trimmed = answer.trim();
+    if (!trimmed || answered) return;
+    onAnswer(trimmed);
+  }
+
+  return (
+    <div className="clarification-card">
+      <div className="clarification-header">
+        <span className="clarification-icon">?</span>
+        <span className="clarification-label">Clarification needed</span>
+      </div>
+      <div className="clarification-question">{clarification.question}</div>
+      {clarification.reason && (
+        <div className="clarification-reason">{clarification.reason}</div>
+      )}
+      {answered ? (
+        <div className="clarification-answered">
+          <span className="clarification-answered-label">Your answer:</span>
+          {clarification.answer}
+        </div>
+      ) : (
+        <div className="clarification-input-row">
+          <input
+            className="clarification-input"
+            type="text"
+            placeholder="Type your answer…"
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+            autoFocus
+          />
+          <button
+            className="clarification-submit-btn"
+            onClick={submit}
+            disabled={!answer.trim()}
+          >
+            Submit
+          </button>
+        </div>
       )}
     </div>
   );
@@ -1169,7 +1227,7 @@ export default function App() {
         buf = parts.pop() ?? "";
         for (const part of parts) {
           if (!part.startsWith("data: ")) continue;
-          let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; error?: string; };
+          let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; error?: string; question?: string; reason?: string; canProceed?: boolean; };
           try { data = JSON.parse(part.slice(6)); } catch { continue; }
           if (data.type === "chunk") {
             setToolRunning(null);
@@ -1200,6 +1258,19 @@ export default function App() {
               if (data.name === "save_legal_context" && data.input) update.legalContext = data.input as LegalContext;
               return [...msgs.slice(0, -1), { ...last, ...update }];
             });
+          } else if (data.type === "clarification") {
+            if (!started) {
+              started = true;
+              setLoading(false);
+              setStreaming(true);
+              setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [], clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } }]);
+            } else {
+              setDisplayMessages((prev) => {
+                const msgs = [...prev];
+                const last = msgs[msgs.length - 1];
+                return [...msgs.slice(0, -1), { ...last, clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } }];
+              });
+            }
           } else if (data.type === "done") {
             if (data.history) setHistory(data.history);
           } else if (data.type === "error") {
@@ -1303,6 +1374,9 @@ export default function App() {
             result?: string;
             history?: unknown[];
             error?: string;
+            question?: string;
+            reason?: string;
+            canProceed?: boolean;
           };
           try { data = JSON.parse(part.slice(6)); } catch { continue; }
 
@@ -1350,6 +1424,22 @@ export default function App() {
               }
               return [...msgs.slice(0, -1), { ...last, ...update }];
             });
+          } else if (data.type === "clarification") {
+            if (!started) {
+              started = true;
+              setLoading(false);
+              setStreaming(true);
+              setDisplayMessages((prev) => [
+                ...prev,
+                { role: "assistant", text: "", toolLogs: [], citations: [], clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } },
+              ]);
+            } else {
+              setDisplayMessages((prev) => {
+                const msgs = [...prev];
+                const last = msgs[msgs.length - 1];
+                return [...msgs.slice(0, -1), { ...last, clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } }];
+              });
+            }
           } else if (data.type === "done") {
             if (data.history) setHistory(data.history);
           } else if (data.type === "error") {
@@ -1431,7 +1521,7 @@ export default function App() {
         buf = parts.pop() ?? "";
         for (const part of parts) {
           if (!part.startsWith("data: ")) continue;
-          let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; error?: string; };
+          let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; error?: string; question?: string; reason?: string; canProceed?: boolean; };
           try { data = JSON.parse(part.slice(6)); } catch { continue; }
           if (data.type === "chunk") {
             setToolRunning(null);
@@ -1461,6 +1551,117 @@ export default function App() {
               if (data.name === "flag_risks" && data.input) update.risks = data.input as DocumentRisks;
               if (data.name === "save_legal_context" && data.input) update.legalContext = data.input as LegalContext;
               return [...msgs.slice(0, -1), { ...last, ...update }];
+            });
+          } else if (data.type === "clarification") {
+            if (!started) {
+              started = true;
+              setLoading(false);
+              setStreaming(true);
+              setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [], clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } }]);
+            } else {
+              setDisplayMessages((prev) => {
+                const msgs = [...prev];
+                const last = msgs[msgs.length - 1];
+                return [...msgs.slice(0, -1), { ...last, clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } }];
+              });
+            }
+          } else if (data.type === "done") {
+            if (data.history) setHistory(data.history as unknown[]);
+          } else if (data.type === "error") {
+            throw new Error(data.error);
+          }
+        }
+      }
+
+      if (!started) {
+        setDisplayMessages((prev) => [...prev, { role: "assistant", text: "(no response)", toolLogs: [], citations: [] }]);
+      }
+    } catch (err) {
+      setDisplayMessages((prev) => [...prev, { role: "assistant", text: `Error: ${String(err)}` }]);
+    } finally {
+      setLoading(false);
+      setStreaming(false);
+      setToolRunning(null);
+    }
+  }
+
+  async function answerClarification(msgIndex: number, answer: string) {
+    // Stamp the answer onto the clarification bubble.
+    setDisplayMessages((prev) => {
+      const msgs = [...prev];
+      msgs[msgIndex] = {
+        ...msgs[msgIndex],
+        clarification: { ...msgs[msgIndex].clarification!, answer },
+      };
+      return msgs;
+    });
+
+    // Send the answer as a new user turn so the agent can continue.
+    setLoading(true);
+    try {
+      setDisplayMessages((prev) => [
+        ...prev,
+        { role: "user", text: answer },
+      ]);
+
+      const res = await fetch("http://localhost:3001/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userMessage: answer, history }),
+      });
+
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let started = false;
+      let rawAccum = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+          if (!part.startsWith("data: ")) continue;
+          let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; error?: string; question?: string; reason?: string; canProceed?: boolean; };
+          try { data = JSON.parse(part.slice(6)); } catch { continue; }
+          if (data.type === "chunk") {
+            setToolRunning(null);
+            rawAccum += data.text;
+            const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
+            if (!started) {
+              started = true;
+              setLoading(false);
+              setStreaming(true);
+              setDisplayMessages((prev) => [...prev, { role: "assistant", text: cleanText, toolLogs: [], citations }]);
+            } else {
+              setDisplayMessages((prev) => {
+                const msgs = [...prev];
+                const last = msgs[msgs.length - 1];
+                return [...msgs.slice(0, -1), { ...last, text: cleanText, citations }];
+              });
+            }
+          } else if (data.type === "tool") {
+            setToolRunning(data.name ?? null);
+            setDisplayMessages((prev) => {
+              const msgs = [...prev];
+              const last = msgs[msgs.length - 1];
+              const toolLogs = [...(last.toolLogs ?? []), { name: data.name ?? "", input: data.input, result: data.result ?? "" }];
+              const update: Partial<DisplayMessage> = { toolLogs };
+              if (data.name === "extract_key_facts" && data.input) update.extractedFacts = data.input as ExtractedFacts;
+              if (data.name === "draft_document" && data.input) update.draft = data.input as DocumentDraft;
+              if (data.name === "flag_risks" && data.input) update.risks = data.input as DocumentRisks;
+              if (data.name === "save_legal_context" && data.input) update.legalContext = data.input as LegalContext;
+              return [...msgs.slice(0, -1), { ...last, ...update }];
+            });
+          } else if (data.type === "clarification") {
+            setDisplayMessages((prev) => {
+              const msgs = [...prev];
+              const last = msgs[msgs.length - 1];
+              return [...msgs.slice(0, -1), { ...last, clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } }];
             });
           } else if (data.type === "done") {
             if (data.history) setHistory(data.history as unknown[]);
@@ -1678,6 +1879,12 @@ export default function App() {
                     )}
                     {msg.legalContext && (
                       <LegalContextCard context={msg.legalContext} />
+                    )}
+                    {msg.clarification && (
+                      <ClarificationCard
+                        clarification={msg.clarification}
+                        onAnswer={(answer) => answerClarification(i, answer)}
+                      />
                     )}
                     <AssistantText
                       text={msg.text}

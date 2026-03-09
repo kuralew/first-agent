@@ -198,7 +198,8 @@ app.post("/chat/stream", async (req, res) => {
     await runAgentStream(
       messages,
       (text) => send({ type: "chunk", text }),
-      (name, input, result) => send({ type: "tool", name, input, result })
+      (name, input, result) => send({ type: "tool", name, input, result }),
+      (question, reason, canProceed) => send({ type: "clarification", question, reason, canProceed })
     );
     send({ type: "done", history: messages });
   } catch (err) {

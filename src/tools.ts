@@ -4,7 +4,7 @@ export const toolDefinitions: Anthropic.Tool[] = [
   {
     name: "extract_key_facts",
     description:
-      "Call this after producing the document brief to save the structured key facts you have identified. " +
+      "Call this to save the structured key facts you have identified from a document. " +
       "Always call this when one or more documents are analyzed — it enables downstream automation, export, and tracking. " +
       "Include citation tags exactly as they appear in the source text.",
     input_schema: {
@@ -76,7 +76,7 @@ export const toolDefinitions: Anthropic.Tool[] = [
   {
     name: "draft_document",
     description:
-      "Call this after extract_key_facts to produce a draft legal document appropriate for the document type analyzed. " +
+      "Call this to produce a draft legal document appropriate for the document type analyzed. " +
       "Choose the draft type based on what was uploaded: " +
       "complaint → draft a formal Response/Answer; " +
       "contract → draft an Obligations & Risk Summary memo; " +
@@ -107,7 +107,7 @@ export const toolDefinitions: Anthropic.Tool[] = [
   {
     name: "flag_risks",
     description:
-      "Call this after draft_document to identify legal risks in the analyzed document(s). " +
+      "Call this to identify legal risks in the analyzed document(s). " +
       "Surface missing clauses, ambiguous language, liability exposure, compliance gaps, and any red flags a lawyer should address. " +
       "Include citation tags pinpointing where each risk appears in the source.",
     input_schema: {
@@ -159,7 +159,7 @@ export const toolDefinitions: Anthropic.Tool[] = [
   {
     name: "search_legal",
     description:
-      "Call this after flag_risks to search for relevant legal precedents, statutes, and case law related to the risks and claims identified. " +
+      "Call this to search for relevant legal precedents, statutes, and case law related to the risks and claims identified. " +
       "Derive 2–4 targeted search queries from the document's specific legal issues — use precise legal terminology. " +
       "The results are supplemental external context only — they never replace or modify the document-grounded analysis.",
     input_schema: {
@@ -223,6 +223,72 @@ export const toolDefinitions: Anthropic.Tool[] = [
         },
       },
       required: ["summary", "findings"],
+    },
+  },
+  {
+    name: "assess_quality",
+    description:
+      "Call this after completing the main analysis chain (facts → draft → risks → research) to self-review quality. " +
+      "Evaluate whether each completed section is thorough and accurate. " +
+      "If gaps exist, you MUST re-run the deficient tool before calling assess_quality again. " +
+      "Only mark overall_ready=true when ALL sections pass. This is your quality gate before responding to the user.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        facts_adequate: {
+          type: "boolean",
+          description: "Are all key facts, parties, dates, and amounts captured with citations?",
+        },
+        draft_adequate: {
+          type: "boolean",
+          description: "Is the draft substantive, complete, and appropriate for the document type?",
+        },
+        risks_adequate: {
+          type: "boolean",
+          description: "Does every risk have a citation? Are the most serious risks captured?",
+        },
+        research_adequate: {
+          type: "boolean",
+          description: "Is the legal research relevant and properly synthesized?",
+        },
+        gaps: {
+          type: "array",
+          description: "Specific gaps or deficiencies found — empty if overall_ready is true",
+          items: { type: "string" },
+        },
+        overall_ready: {
+          type: "boolean",
+          description: "True only when all sections pass. If false, you must re-run the deficient tools.",
+        },
+      },
+      required: ["facts_adequate", "draft_adequate", "risks_adequate", "research_adequate", "gaps", "overall_ready"],
+    },
+  },
+  {
+    name: "request_clarification",
+    description:
+      "Call this when critical information is missing and proceeding would produce inaccurate or meaningless output. " +
+      "Use sparingly — only for genuinely blocking gaps (e.g. unknown governing jurisdiction, missing exhibit referenced in the document, unclear scope of an engagement). " +
+      "Do NOT use for information you can reasonably infer. " +
+      "Set can_proceed=true if you can do a useful partial analysis while waiting. " +
+      "Set can_proceed=false if the missing info makes any analysis pointless.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        question: {
+          type: "string",
+          description: "The specific question to ask the user — clear and actionable",
+        },
+        reason: {
+          type: "string",
+          description: "Why this information is needed and what it will affect",
+        },
+        can_proceed: {
+          type: "boolean",
+          description: "Whether partial analysis can proceed while waiting for the answer",
+        },
+      },
+      required: ["question", "reason", "can_proceed"],
     },
   },
 ];
@@ -294,6 +360,17 @@ export async function executeTool(
       const findings = (input.findings as unknown[])?.length ?? 0;
       return `Legal context recorded: ${findings} findings.`;
     }
+
+    case "assess_quality": {
+      const gaps = input.gaps as string[];
+      if (input.overall_ready) {
+        return "Quality check passed. Analysis is complete and ready to present.";
+      }
+      return `Quality gaps found — do NOT respond yet. Re-run the deficient tools to fix these issues:\n${gaps.map((g) => `• ${g}`).join("\n")}`;
+    }
+
+    case "request_clarification":
+      return `Clarification requested: "${input.question}". Pausing analysis until user responds.`;
 
     default:
       return `Unknown tool: ${name}`;
