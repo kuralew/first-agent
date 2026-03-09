@@ -9,7 +9,7 @@ import {
   Popup,
 } from "react-pdf-highlighter";
 import type { IHighlight, ScaledPosition } from "react-pdf-highlighter";
-import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, CaseListItem, SavedCase, DraftReview, ClarificationRequest } from "./types.ts";
+import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, CaseListItem, SavedCase, DraftReview, ClarificationRequest, CaseMemory } from "./types.ts";
 import { extractTextWithBBoxes } from "./pdfExtract.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -916,6 +916,7 @@ export default function App() {
   useEffect(() => {
     if (!streaming && activeCaseIdRef.current && displayMessages.length > 0) {
       saveCase(displayMessages, history);
+      saveMemory(displayMessages);
     }
   }, [streaming]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1123,6 +1124,61 @@ export default function App() {
         body: JSON.stringify({ name, history: hist, displayMessages: serialized }),
       });
       fetchCases();
+    } catch { /* ignore */ }
+  }
+
+  async function saveMemory(msgs: DisplayMessage[], feedbackToAdd?: string) {
+    const id = activeCaseIdRef.current;
+    if (!id) return;
+
+    // Collect the latest data from messages.
+    let documentType = "";
+    let parties: CaseMemory["parties"] = [];
+    let keyRisks: string[] = [];
+    let overallRiskLevel: string | undefined;
+    let draftType: string | undefined;
+    const existingFeedback: string[] = [];
+
+    for (const msg of msgs) {
+      if (msg.extractedFacts) {
+        documentType = msg.extractedFacts.document_type;
+        parties = msg.extractedFacts.parties.map((p) => ({ role: p.role, name: p.name }));
+      }
+      if (msg.risks) {
+        keyRisks = msg.risks.risks.slice(0, 6).map((r) => r.description.slice(0, 80));
+        overallRiskLevel = msg.risks.overall_risk_level;
+      }
+      if (msg.draft) {
+        draftType = msg.draft.draft_type;
+      }
+      if (msg.draftReview?.status === "rejected" && msg.draftReview.comment) {
+        existingFeedback.push(msg.draftReview.comment);
+      }
+    }
+
+    if (!documentType) return; // Only save if a document was actually analyzed.
+
+    const feedbackPatterns = feedbackToAdd
+      ? [...new Set([...existingFeedback, feedbackToAdd])]
+      : existingFeedback;
+
+    const memory: CaseMemory = {
+      caseId: id,
+      caseName: caseNameRef.current || "Untitled Case",
+      documentType,
+      parties,
+      keyRisks,
+      overallRiskLevel,
+      draftType,
+      feedbackPatterns,
+    };
+
+    try {
+      await fetch("http://localhost:3001/memories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(memory),
+      });
     } catch { /* ignore */ }
   }
 
@@ -1487,6 +1543,9 @@ export default function App() {
       };
       return msgs;
     });
+
+    // Persist the feedback pattern to memory so future analyses benefit from it.
+    saveMemory(displayMessages, comment);
 
     // Feed the feedback back into the conversation as a user message.
     const feedbackMsg = `Please revise the draft based on this feedback:\n\n${comment}`;
