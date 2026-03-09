@@ -115,13 +115,18 @@ export async function runAgentStream(
   messages: Anthropic.MessageParam[],
   onChunk: (text: string) => void,
   onToolLog?: ToolLogCallback,
-  onClarification?: ClarificationCallback
+  onClarification?: ClarificationCallback,
+  memoryContext?: string
 ): Promise<void> {
+  const systemPrompt = memoryContext
+    ? `${SYSTEM_PROMPT}\n\n${memoryContext}`
+    : SYSTEM_PROMPT;
+
   while (true) {
     const stream = client.messages.stream({
       model: "claude-sonnet-4-6",
       max_tokens: 8000,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       tools: toolDefinitions,
       messages,
     });

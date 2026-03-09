@@ -53,6 +53,101 @@ watch(inboxDir, { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 1
     broadcast({ type: "new_document", filename, url: `/inbox/${encodeURIComponent(filename)}` });
   });
 
+// ── Case memory ──────────────────────────────────────────────────────────────
+
+const memoriesDir = path.join(__dirname, "../../memories");
+if (!fs.existsSync(memoriesDir)) fs.mkdirSync(memoriesDir, { recursive: true });
+
+interface CaseMemory {
+  caseId: string;
+  caseName: string;
+  documentType: string;
+  parties: Array<{ role: string; name: string }>;
+  keyRisks: string[];
+  overallRiskLevel?: string;
+  draftType?: string;
+  feedbackPatterns: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+function loadRecentMemories(limit = 8): CaseMemory[] {
+  try {
+    return fs.readdirSync(memoriesDir)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        try { return JSON.parse(fs.readFileSync(path.join(memoriesDir, f), "utf-8")) as CaseMemory; }
+        catch { return null; }
+      })
+      .filter(Boolean) as CaseMemory[]
+      ;
+  } catch { return []; }
+}
+
+function formatMemoriesForPrompt(memories: CaseMemory[]): string {
+  if (memories.length === 0) return "";
+  const sorted = [...memories].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  ).slice(0, 8);
+
+  const lines = sorted.map((m, i) => {
+    const date = new Date(m.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const parties = m.parties.slice(0, 3).map((p) => `${p.name} (${p.role})`).join(", ");
+    const risks = m.keyRisks.slice(0, 4).join("; ");
+    const feedback = m.feedbackPatterns.length
+      ? `\n   Attorney feedback: ${m.feedbackPatterns.map((f) => `"${f}"`).join(" · ")}`
+      : "";
+    return [
+      `Case ${i + 1} — "${m.caseName}" (${m.documentType}) · ${date}`,
+      parties ? `   Parties: ${parties}` : null,
+      risks ? `   Key risks: ${risks}${m.overallRiskLevel ? ` [OVERALL: ${m.overallRiskLevel}]` : ""}` : null,
+      m.draftType ? `   Draft produced: ${m.draftType}` : null,
+      feedback,
+    ].filter(Boolean).join("\n");
+  });
+
+  return [
+    "─────────────────────────────────────────────────",
+    "FIRM MEMORY — PAST CASE PATTERNS",
+    "─────────────────────────────────────────────────",
+    "Use the following past case summaries as supplemental context when relevant.",
+    "Do NOT fabricate current-document facts from past cases.",
+    "Do NOT use [d·p·l] citation tags for past case references — they are patterns only.",
+    "",
+    ...lines,
+    "─────────────────────────────────────────────────",
+  ].join("\n");
+}
+
+// Save or update a case memory.
+app.post("/memories", (req, res) => {
+  const mem = req.body as Partial<CaseMemory>;
+  if (!mem.caseId) return res.status(400).json({ error: "caseId required" });
+  const id = mem.caseId.replace(/[^a-zA-Z0-9_-]/g, "");
+  const file = path.join(memoriesDir, `${id}.json`);
+  try {
+    const existing: CaseMemory | null = fs.existsSync(file)
+      ? JSON.parse(fs.readFileSync(file, "utf-8"))
+      : null;
+    const updated: CaseMemory = {
+      caseId: id,
+      caseName: mem.caseName ?? existing?.caseName ?? "Untitled",
+      documentType: mem.documentType ?? existing?.documentType ?? "Unknown",
+      parties: mem.parties ?? existing?.parties ?? [],
+      keyRisks: mem.keyRisks ?? existing?.keyRisks ?? [],
+      overallRiskLevel: mem.overallRiskLevel ?? existing?.overallRiskLevel,
+      draftType: mem.draftType ?? existing?.draftType,
+      feedbackPatterns: mem.feedbackPatterns ?? existing?.feedbackPatterns ?? [],
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(file, JSON.stringify(updated, null, 2));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── Case storage ─────────────────────────────────────────────────────────────
 
 const casesDir = path.join(__dirname, "../../cases");
@@ -195,11 +290,15 @@ app.post("/chat/stream", async (req, res) => {
       { role: "user", content: userText },
     ];
 
+    const recentMemories = loadRecentMemories();
+    const memoryContext = formatMemoriesForPrompt(recentMemories);
+
     await runAgentStream(
       messages,
       (text) => send({ type: "chunk", text }),
       (name, input, result) => send({ type: "tool", name, input, result }),
-      (question, reason, canProceed) => send({ type: "clarification", question, reason, canProceed })
+      (question, reason, canProceed) => send({ type: "clarification", question, reason, canProceed }),
+      memoryContext || undefined
     );
     send({ type: "done", history: messages });
   } catch (err) {

@@ -106,6 +106,17 @@ export interface LegalContext {
   findings: LegalFinding[];
 }
 
+export interface CaseMemory {
+  caseId: string;
+  caseName: string;
+  documentType: string;
+  parties: Array<{ role: string; name: string }>;
+  keyRisks: string[];
+  overallRiskLevel?: string;
+  draftType?: string;
+  feedbackPatterns: string[];
+}
+
 export interface CaseListItem {
   id: string;
   name: string;
