@@ -1,142 +1,14 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import type { ReportData } from "./ReportPdf.tsx";
+import { useState, useRef, useEffect, useCallback, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  PdfLoader,
-  PdfHighlighter,
-  Highlight,
-  Popup,
-} from "react-pdf-highlighter";
-import type { IHighlight, ScaledPosition } from "react-pdf-highlighter";
-import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, CaseListItem, SavedCase, DraftReview, ClarificationRequest, CaseMemory } from "./types.ts";
-import { extractTextWithBBoxes } from "./pdfExtract.ts";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const WORKER_SRC = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
-
-// Matches [d{docId}·p{page}·l{line}·bbox:{x1},{y1},{x2},{y2}]
-const CITATION_RE = /\[d(\d+)·p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/g;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Strip citation tags from raw text and return clean text + citation list.
- *
- * Consecutive tags from the same doc+page with only whitespace between them
- * are treated as a range and merged into one citation whose bbox spans the
- * full passage.
- */
-// Phrases Claude sometimes emits before calling tools — strip them from display.
-const PLANNING_PHRASES = [
-  /^Now I['']ll call the required tools simultaneously\.?\n?/im,
-  /^I['']ll now call\b[^\n]*\n?/im,
-  /^Let me (now |)call\b[^\n]*\n?/im,
-  /^I['']ll call\b[^\n]*\n?/im,
-  /^Now(,| I['']ll)\b[^\n]*tools[^\n]*\n?/im,
-];
-
-function stripPlanningPhrases(text: string): string {
-  let out = text;
-  for (const re of PLANNING_PHRASES) out = out.replace(re, "");
-  return out;
-}
-
-function parseCitations(raw: string): { text: string; citations: Citation[] } {
-  type TagMatch = {
-    index: number; end: number;
-    docId: number; page: number;
-    x1: number; y1: number; x2: number; y2: number;
-  };
-
-  const tags: TagMatch[] = [];
-  const re = new RegExp(CITATION_RE.source, "g");
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(raw)) !== null) {
-    tags.push({
-      index: m.index, end: m.index + m[0].length,
-      docId: +m[1], page: +m[2],
-      x1: +m[4], y1: +m[5], x2: +m[6], y2: +m[7],
-    });
-  }
-
-  // Group consecutive same-doc+page tags (only whitespace between) into ranges.
-  const groups: TagMatch[][] = [];
-  for (const tag of tags) {
-    const last = groups[groups.length - 1];
-    const prev = last?.[last.length - 1];
-    if (
-      prev &&
-      prev.docId === tag.docId &&
-      prev.page === tag.page &&
-      /^\s*$/.test(raw.slice(prev.end, tag.index))
-    ) {
-      last.push(tag);
-    } else {
-      groups.push([tag]);
-    }
-  }
-
-  // Merge each group into one citation with a bbox spanning the full passage.
-  const citations: Citation[] = [];
-  const replacements: { start: number; end: number; label: string }[] = [];
-  let nextId = 1;
-
-  for (const group of groups) {
-    const docId = group[0].docId;
-    const page = group[0].page;
-    const x1 = Math.min(...group.map((t) => t.x1));
-    const y1 = Math.min(...group.map((t) => t.y1));
-    const x2 = Math.max(...group.map((t) => t.x2));
-    const y2 = Math.max(...group.map((t) => t.y2));
-    const existing = citations.find(
-      (c) => c.docId === docId && c.page === page && c.x1 === x1 && c.y1 === y1
-    );
-    const id = existing ? existing.id : nextId;
-    if (!existing) {
-      citations.push({ id, docId, page, x1, y1, x2, y2, quote: "" });
-      nextId++;
-    }
-    replacements.push({
-      start: group[0].index,
-      end: group[group.length - 1].end,
-      label: "[" + id + "]",
-    });
-  }
-
-  // Apply back-to-front so earlier indexes stay valid.
-  let text = raw;
-  for (const rep of [...replacements].reverse()) {
-    text = text.slice(0, rep.start) + rep.label + text.slice(rep.end);
-  }
-
-  // Strip trailing incomplete citation tag that may appear during streaming.
-  text = text.replace(/\[d?\d[^\]]*$/, "");
-
-  return { text, citations };
-}
-
-/** Convert a Citation to an IHighlight for react-pdf-highlighter. */
-function citationToHighlight(c: Citation, docs: DocInfo[]): IHighlight {
-  const doc = docs.find((d) => d.id === c.docId);
-  const dim = doc?.pageDims[c.page] ?? { w: 612, h: 792 };
-  const rect = {
-    x1: c.x1, y1: c.y1, x2: c.x2, y2: c.y2,
-    width: dim.w, height: dim.h, pageNumber: c.page,
-  };
-  return {
-    id: String(c.id),
-    content: { text: c.quote || `Citation ${c.id}` },
-    comment: { text: `[${c.id}]`, emoji: "📄" },
-    position: {
-      boundingRect: rect,
-      rects: [rect],
-      pageNumber: c.page,
-      usePdfCoordinates: true,
-    } as ScaledPosition,
-  };
-}
+import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, CaseListItem, SavedCase, DraftReview, ClarificationRequest, CaseMemory, ConversationTurn } from "./types.ts";
+import { extractPdfText } from "./adapters/pdfExtract.ts";
+import { generatePdfReport } from "./adapters/pdfReport.tsx";
+import type { ReportData } from "./adapters/pdfReport.tsx";
+import { PdfViewerPane, citationToHighlight } from "./adapters/pdfViewer.tsx";
+import type { IHighlight } from "./adapters/pdfViewer.tsx";
+import { parseSingleTag } from "./utils/citations.ts";
+import { useStreamProcessor } from "./hooks/useStreamProcessor.ts";
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -253,24 +125,13 @@ function AssistantText({
 }
 
 /** Renders extracted key facts as a structured, exportable card. */
-function FactsCard({
+const FactsCard = memo(function FactsCard({
   facts,
   onCitationClick,
 }: {
   facts: ExtractedFacts;
   onCitationClick: (c: Citation) => void;
 }) {
-  // Parse a raw citation tag string into a Citation object for button rendering.
-  // Handles full format [d1·p4·l26·bbox:x1,y1,x2,y2] and partial [d1·p4·l26] (no bbox).
-  function parseSingleTag(tag: string | undefined, fallbackId: number): Citation | null {
-    if (!tag) return null;
-    const full = tag.match(/\[d(\d+)·p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/);
-    if (full) return { id: fallbackId, docId: +full[1], page: +full[2], x1: +full[4], y1: +full[5], x2: +full[6], y2: +full[7], quote: "" };
-    const partial = tag.match(/\[d(\d+)·p(\d+)/);
-    if (partial) return { id: fallbackId, docId: +partial[1], page: +partial[2], x1: 0, y1: 0, x2: 0, y2: 0, quote: "" };
-    return null;
-  }
-
   function CitationButton({ tag, id }: { tag?: string; id: number }) {
     const c = parseSingleTag(tag, id);
     if (!c) return null;
@@ -285,8 +146,6 @@ function FactsCard({
     );
   }
 
-  // Renders plain text, converting any embedded [d1·p2·...] tags into ↗ buttons.
-  // Uses the shared citationCounter from the enclosing scope so IDs never collide.
   const renderInlineText = (text: string | undefined) => {
     const parts = (text ?? "").split(/(\[d\d+·[^\]]+\])/g);
     return parts.map((part, i) => {
@@ -298,7 +157,6 @@ function FactsCard({
     });
   };
 
-  // Group facts by category.
   const byCategory = facts.facts.reduce<Record<string, typeof facts.facts>>((acc, f) => {
     (acc[f.category] = acc[f.category] ?? []).push(f);
     return acc;
@@ -329,7 +187,6 @@ function FactsCard({
         </button>
       </div>
 
-      {/* Parties */}
       {facts.parties.length > 0 && (
         <div className="facts-section">
           <div className="facts-section-label">Parties</div>
@@ -349,7 +206,6 @@ function FactsCard({
         </div>
       )}
 
-      {/* Facts by category */}
       {Object.entries(byCategory).map(([category, items]) => (
         <div className="facts-section" key={category}>
           <div className="facts-section-label">{category}</div>
@@ -364,7 +220,6 @@ function FactsCard({
         </div>
       ))}
 
-      {/* Key Dates */}
       {facts.key_dates && facts.key_dates.length > 0 && (
         <div className="facts-section">
           <div className="facts-section-label">Key Dates</div>
@@ -380,7 +235,6 @@ function FactsCard({
         </div>
       )}
 
-      {/* Amounts */}
       {facts.amounts && facts.amounts.length > 0 && (
         <div className="facts-section">
           <div className="facts-section-label">Amounts</div>
@@ -397,10 +251,10 @@ function FactsCard({
       )}
     </div>
   );
-}
+});
 
 /** Renders a drafted document with markdown preview, .docx download, and approve/reject review. */
-function DraftCard({
+const DraftCard = memo(function DraftCard({
   draft,
   review,
   onApprove,
@@ -419,10 +273,7 @@ function DraftCard({
     const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import("docx");
 
     const children: InstanceType<typeof Paragraph>[] = [];
-
-    children.push(
-      new Paragraph({ text: draft.title, heading: HeadingLevel.TITLE })
-    );
+    children.push(new Paragraph({ text: draft.title, heading: HeadingLevel.TITLE }));
 
     for (const line of draft.content.split("\n")) {
       if (line.startsWith("## ")) {
@@ -498,7 +349,6 @@ function DraftCard({
         </div>
       )}
 
-      {/* Review actions — only shown while pending */}
       {!reviewed && onApprove && onReject && (
         <div className="draft-review-bar">
           {!rejecting ? (
@@ -543,7 +393,6 @@ function DraftCard({
         </div>
       )}
 
-      {/* Show rejection comment after submission */}
       {review?.status === "rejected" && review.comment && (
         <div className="draft-review-comment">
           <span className="draft-review-comment-label">Feedback sent:</span>
@@ -552,10 +401,10 @@ function DraftCard({
       )}
     </div>
   );
-}
+});
 
 /** Renders the flagged risks card. */
-function RisksCard({
+const RisksCard = memo(function RisksCard({
   risks,
   onCitationClick,
 }: {
@@ -568,15 +417,6 @@ function RisksCard({
     HIGH: "#B71C1C",
     CRITICAL: "#6A0000",
   };
-
-  function parseSingleTag(tag: string | undefined, fallbackId: number): Citation | null {
-    if (!tag) return null;
-    const full = tag.match(/\[d(\d+)·p(\d+)·l(\d+)·bbox:(\d+),(\d+),(\d+),(\d+)\]/);
-    if (full) return { id: fallbackId, docId: +full[1], page: +full[2], x1: +full[4], y1: +full[5], x2: +full[6], y2: +full[7], quote: "" };
-    const partial = tag.match(/\[d(\d+)·p(\d+)/);
-    if (partial) return { id: fallbackId, docId: +partial[1], page: +partial[2], x1: 0, y1: 0, x2: 0, y2: 0, quote: "" };
-    return null;
-  }
 
   function CitationButton({ tag, id }: { tag?: string; id: number }) {
     const c = parseSingleTag(tag, id);
@@ -645,10 +485,10 @@ function RisksCard({
       </div>
     </div>
   );
-}
+});
 
 /** Renders legal research findings as a clearly-labeled external research card. */
-function LegalContextCard({ context }: { context: LegalContext }) {
+const LegalContextCard = memo(function LegalContextCard({ context }: { context: LegalContext }) {
   const [expanded, setExpanded] = useState(true);
 
   return (
@@ -693,10 +533,10 @@ function LegalContextCard({ context }: { context: LegalContext }) {
       )}
     </div>
   );
-}
+});
 
 /** Renders a clarification request with an inline answer input. */
-function ClarificationCard({
+const ClarificationCard = memo(function ClarificationCard({
   clarification,
   onAnswer,
 }: {
@@ -749,7 +589,7 @@ function ClarificationCard({
       )}
     </div>
   );
-}
+});
 
 // ── Case sidebar ──────────────────────────────────────────────────────────────
 
@@ -826,33 +666,27 @@ function CaseSidebar({
 
 export default function App() {
   const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
-  const [history, setHistory] = useState<unknown[]>([]);
+  const [history, setHistory] = useState<ConversationTurn[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [toolRunning, setToolRunning] = useState<string | null>(null);
 
-  // Case memory
   const [cases, setCases] = useState<CaseListItem[]>([]);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [caseName, setCaseName] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Docs staged in the input area, not yet sent.
-  const [pendingDocs, setPendingDocs] = useState<
-    Array<{ file: File; name: string; url: string }>
-  >([]);
-
-  // All documents seen in this conversation, keyed by stable docId.
+  const [pendingDocs, setPendingDocs] = useState<Array<{ file: File; name: string; url: string }>>([]);
   const [sessionDocs, setSessionDocs] = useState<DocInfo[]>([]);
-  // Monotonically increasing counter for assigning docIds.
   const [nextDocId, setNextDocId] = useState(1);
 
   const [previewPdf, setPreviewPdf] = useState<{ url: string; name: string } | null>(null);
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
-  // Bumped after scroll when textLayer wasn't ready; forces re-render →
-  // new highlights reference → PdfHighlighter.componentDidUpdate → renderHighlightLayers().
   const [highlightKey, setHighlightKey] = useState(0);
+
+  const [intakeNotification, setIntakeNotification] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -860,25 +694,28 @@ export default function App() {
   const scrollToRef = useRef<((h: IHighlight) => void) | null>(null);
   const previewPaneRef = useRef<HTMLDivElement>(null);
   const pendingCitationRef = useRef<Citation | null>(null);
-  // Always-current sessionDocs for use inside async callbacks.
   const sessionDocsRef = useRef<DocInfo[]>([]);
   useEffect(() => { sessionDocsRef.current = sessionDocs; }, [sessionDocs]);
 
-  // Always-current case refs — needed inside async streaming callbacks.
   const activeCaseIdRef = useRef<string | null>(null);
   useEffect(() => { activeCaseIdRef.current = activeCaseId; }, [activeCaseId]);
   const caseNameRef = useRef("");
   useEffect(() => { caseNameRef.current = caseName; }, [caseName]);
 
-  // Intake pipeline state.
-  const [intakeNotification, setIntakeNotification] = useState<string | null>(null);
-  // Refs so async intake callback always sees latest values.
   const nextDocIdRef = useRef(1);
   useEffect(() => { nextDocIdRef.current = nextDocId; }, [nextDocId]);
-  const historyRef = useRef<unknown[]>([]);
+  const historyRef = useRef<ConversationTurn[]>([]);
   useEffect(() => { historyRef.current = history; }, [history]);
-  // Ref to intakeAnalyze so the EventSource effect can call it without re-subscribing.
+
   const intakeAnalyzeRef = useRef<((filename: string, url: string) => Promise<void>) | null>(null);
+
+  const { processStream } = useStreamProcessor({
+    setDisplayMessages,
+    setHistory,
+    setLoading,
+    setStreaming,
+    setToolRunning,
+  });
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -891,7 +728,6 @@ export default function App() {
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
   }, [input]);
 
-  // Connect to server-sent events; auto-analyze any PDF dropped in ./inbox/.
   useEffect(() => {
     const es = new EventSource("http://localhost:3001/events");
     es.onmessage = (e) => {
@@ -906,13 +742,8 @@ export default function App() {
     return () => es.close();
   }, []);
 
-  // Load case list on mount.
   useEffect(() => { fetchCases(); }, []);
 
-  // Auto-save whenever streaming ends and we have an active case.
-  // Using streaming as the sole dep is intentional — we read the latest committed
-  // displayMessages and history (React has already flushed all state updates by
-  // the time this effect runs after streaming→false).
   useEffect(() => {
     if (!streaming && activeCaseIdRef.current && displayMessages.length > 0) {
       saveCase(displayMessages, history);
@@ -922,9 +753,7 @@ export default function App() {
 
   // When the preview pane first opens (previewPdf changes), wait for pdfjs to
   // initialise, scroll to the pending citation's page, then wait for the
-  // textLayer to render before setting activeCitation. This avoids the
-  // StrictMode double-init bug where renderHighlightLayers() runs before
-  // the textLayer exists.
+  // textLayer to render before setting activeCitation.
   useEffect(() => {
     if (!previewPdf || !pendingCitationRef.current) return;
 
@@ -947,9 +776,7 @@ export default function App() {
     const scrollThenWaitForTextLayer = () => {
       if (cancelled) return;
       const pdfViewer = previewPaneRef.current?.querySelector(".pdfViewer") as HTMLElement | null;
-      const pageEl = pdfViewer?.querySelector(
-        `[data-page-number="${pending.page}"]`
-      ) as HTMLElement | null;
+      const pageEl = pdfViewer?.querySelector(`[data-page-number="${pending.page}"]`) as HTMLElement | null;
       if (pdfViewer && pageEl) {
         const dims = sessionDocsRef.current.find((d) => d.id === pending.docId)?.pageDims ?? {};
         const dim = dims[pending.page];
@@ -965,9 +792,7 @@ export default function App() {
 
     const waitForTextLayer = (attempts: number) => {
       if (cancelled) return;
-      const targetPage = previewPaneRef.current?.querySelector(
-        `[data-page-number="${pending.page}"]`
-      );
+      const targetPage = previewPaneRef.current?.querySelector(`[data-page-number="${pending.page}"]`);
       const textLayer = targetPage?.querySelector(".textLayer") as HTMLElement | null;
       if (textLayer && textLayer.children.length > 0) {
         pendingCitationRef.current = null;
@@ -981,10 +806,7 @@ export default function App() {
     return () => { cancelled = true; };
   }, [previewPdf]);
 
-  // Scroll to cited line whenever activeCitation changes. If the target page's
-  // textLayer isn't in the DOM yet (off-screen), poll until it appears then
-  // bump highlightKey to force a re-render → new highlights reference →
-  // PdfHighlighter.componentDidUpdate → renderHighlightLayers() with live textLayer.
+  // Scroll to cited line whenever activeCitation changes.
   useEffect(() => {
     if (!activeCitation || !previewPdf) return;
 
@@ -994,9 +816,7 @@ export default function App() {
     const tryScroll = () => {
       if (cancelled) return;
       const pdfViewer = previewPaneRef.current?.querySelector(".pdfViewer") as HTMLElement | null;
-      const pageEl = pdfViewer?.querySelector(
-        `[data-page-number="${activeCitation.page}"]`
-      ) as HTMLElement | null;
+      const pageEl = pdfViewer?.querySelector(`[data-page-number="${activeCitation.page}"]`) as HTMLElement | null;
 
       if (pdfViewer && pageEl) {
         const dims = sessionDocs.find((d) => d.id === activeCitation.docId)?.pageDims ?? {};
@@ -1040,11 +860,7 @@ export default function App() {
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
-    const newDocs = files.map((file) => ({
-      file,
-      name: file.name,
-      url: URL.createObjectURL(file),
-    }));
+    const newDocs = files.map((file) => ({ file, name: file.name, url: URL.createObjectURL(file) }));
     setPendingDocs((prev) => [...prev, ...newDocs]);
     e.target.value = "";
   }
@@ -1061,13 +877,10 @@ export default function App() {
     if (!doc) return;
 
     if (!previewPdf || previewPdf.url !== doc.url) {
-      // Pane is opening or switching to a different doc.
-      // Defer activeCitation until PdfHighlighter is initialised for the new doc.
       pendingCitationRef.current = citation;
       setActiveCitation(null);
       setPreviewPdf({ url: doc.url, name: doc.name });
     } else {
-      // Same doc already open — set directly.
       setActiveCitation(citation);
     }
   }
@@ -1079,7 +892,7 @@ export default function App() {
     } catch { /* server may not be running */ }
   }
 
-  async function saveCase(msgs: DisplayMessage[], hist: unknown[]) {
+  async function saveCase(msgs: DisplayMessage[], hist: ConversationTurn[]) {
     const id = activeCaseIdRef.current;
     if (!id) return;
     let name = caseNameRef.current;
@@ -1091,8 +904,7 @@ export default function App() {
       setCaseName(name);
       caseNameRef.current = name;
     }
-    // Upload any blob-URL PDFs to the server so they persist across sessions.
-    const urlMap = new Map<string, string>(); // blob URL → server URL
+    const urlMap = new Map<string, string>();
     for (const doc of sessionDocsRef.current) {
       if (!doc.url.startsWith("blob:")) continue;
       try {
@@ -1108,8 +920,6 @@ export default function App() {
         }
       } catch { /* ignore */ }
     }
-
-    // Serialize messages: substitute server URLs for blob URLs, keep pageDims.
     const serialized = msgs.map((m) => ({
       ...m,
       docs: m.docs?.map((d) => ({
@@ -1131,7 +941,6 @@ export default function App() {
     const id = activeCaseIdRef.current;
     if (!id) return;
 
-    // Collect the latest data from messages.
     let documentType = "";
     let parties: CaseMemory["parties"] = [];
     let keyRisks: string[] = [];
@@ -1148,15 +957,13 @@ export default function App() {
         keyRisks = msg.risks.risks.slice(0, 6).map((r) => r.description.slice(0, 80));
         overallRiskLevel = msg.risks.overall_risk_level;
       }
-      if (msg.draft) {
-        draftType = msg.draft.draft_type;
-      }
+      if (msg.draft) draftType = msg.draft.draft_type;
       if (msg.draftReview?.status === "rejected" && msg.draftReview.comment) {
         existingFeedback.push(msg.draftReview.comment);
       }
     }
 
-    if (!documentType) return; // Only save if a document was actually analyzed.
+    if (!documentType) return;
 
     const feedbackPatterns = feedbackToAdd
       ? [...new Set([...existingFeedback, feedbackToAdd])]
@@ -1193,7 +1000,6 @@ export default function App() {
       caseNameRef.current = data.name;
       setHistory(data.history);
       setDisplayMessages(data.displayMessages);
-      // Rebuild sessionDocs from saved messages (no blob URLs — View is hidden).
       const loadedDocs: DocInfo[] = [];
       for (const msg of data.displayMessages) {
         for (const doc of msg.docs ?? []) {
@@ -1244,7 +1050,7 @@ export default function App() {
       const blob = await response.blob();
       const file = new File([blob], filename, { type: "application/pdf" });
       const objectUrl = URL.createObjectURL(file);
-      const { text: rawText, pageDims } = await extractTextWithBBoxes(file);
+      const { text: rawText, pageDims } = await extractPdfText(file);
 
       const docId = nextDocIdRef.current;
       const prefixedText = rawText.replace(/^\[p/gm, `[d${docId}\u00B7p`);
@@ -1266,84 +1072,8 @@ export default function App() {
           docText: `=== Document ${docId}: ${filename} ===\n${prefixedText.trim()}\n\n`,
         }),
       });
-
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      let started = false;
-      let rawAccum = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split("\n\n");
-        buf = parts.pop() ?? "";
-        for (const part of parts) {
-          if (!part.startsWith("data: ")) continue;
-          let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; error?: string; question?: string; reason?: string; canProceed?: boolean; };
-          try { data = JSON.parse(part.slice(6)); } catch { continue; }
-          if (data.type === "chunk") {
-            setToolRunning(null);
-            rawAccum += data.text;
-            const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
-            if (!started) {
-              started = true;
-              setLoading(false);
-              setStreaming(true);
-              setDisplayMessages((prev) => [...prev, { role: "assistant", text: cleanText, toolLogs: [], citations }]);
-            } else {
-              setDisplayMessages((prev) => {
-                const msgs = [...prev];
-                const last = msgs[msgs.length - 1];
-                return [...msgs.slice(0, -1), { ...last, text: cleanText, citations }];
-              });
-            }
-          } else if (data.type === "tool") {
-            if (!started) {
-              started = true;
-              setLoading(false);
-              setStreaming(true);
-              setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [] }]);
-            }
-            setToolRunning(data.name ?? null);
-            setDisplayMessages((prev) => {
-              const msgs = [...prev];
-              const last = msgs[msgs.length - 1];
-              const toolLogs = [...(last.toolLogs ?? []), { name: data.name ?? "", input: data.input, result: data.result ?? "" }];
-              const update: Partial<DisplayMessage> = { toolLogs };
-              if (data.name === "extract_key_facts" && data.input) update.extractedFacts = data.input as ExtractedFacts;
-              if (data.name === "draft_document" && data.input) update.draft = data.input as DocumentDraft;
-              if (data.name === "flag_risks" && data.input) update.risks = data.input as DocumentRisks;
-              if (data.name === "save_legal_context" && data.input) update.legalContext = data.input as LegalContext;
-              return [...msgs.slice(0, -1), { ...last, ...update }];
-            });
-          } else if (data.type === "clarification") {
-            if (!started) {
-              started = true;
-              setLoading(false);
-              setStreaming(true);
-              setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [], clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } }]);
-            } else {
-              setDisplayMessages((prev) => {
-                const msgs = [...prev];
-                const last = msgs[msgs.length - 1];
-                return [...msgs.slice(0, -1), { ...last, clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } }];
-              });
-            }
-          } else if (data.type === "done") {
-            if (data.history) setHistory(data.history);
-          } else if (data.type === "error") {
-            throw new Error(data.error);
-          }
-        }
-      }
-
-      if (!started) {
-        setDisplayMessages((prev) => [...prev, { role: "assistant", text: "(no response)", toolLogs: [], citations: [] }]);
-      }
+      await processStream(res);
     } catch (err) {
       setDisplayMessages((prev) => [...prev, { role: "assistant", text: `Intake error: ${String(err)}` }]);
     } finally {
@@ -1352,7 +1082,6 @@ export default function App() {
       setToolRunning(null);
     }
   }
-  // Keep ref current so the EventSource effect always calls the latest version.
   intakeAnalyzeRef.current = intakeAnalyze;
 
   async function send() {
@@ -1370,16 +1099,13 @@ export default function App() {
     }
 
     setLoading(true);
-
     try {
-      // Extract text for each pending doc, assign stable docIds, prefix tags.
       let docId = nextDocId;
       const newDocs: DocInfo[] = [];
       let combinedDocText = "";
 
       for (const pending of docsToSend) {
-        const { text: rawText, pageDims } = await extractTextWithBBoxes(pending.file);
-        // Prefix each citation tag with the document ID: [p → [d{N}·p
+        const { text: rawText, pageDims } = await extractPdfText(pending.file);
         const prefixedText = rawText.replace(/^\[p/gm, `[d${docId}\u00B7p`);
         newDocs.push({ id: docId, name: pending.name, url: pending.url, pageDims });
         combinedDocText += `=== Document ${docId}: ${pending.name} ===\n${prefixedText.trim()}\n\n`;
@@ -1409,119 +1135,8 @@ export default function App() {
           docText: combinedDocText || undefined,
         }),
       });
-
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      let started = false;
-      let rawAccum = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split("\n\n");
-        buf = parts.pop() ?? "";
-
-        for (const part of parts) {
-          if (!part.startsWith("data: ")) continue;
-          let data: {
-            type: string;
-            text?: string;
-            name?: string;
-            input?: unknown;
-            result?: string;
-            history?: unknown[];
-            error?: string;
-            question?: string;
-            reason?: string;
-            canProceed?: boolean;
-          };
-          try { data = JSON.parse(part.slice(6)); } catch { continue; }
-
-          if (data.type === "chunk") {
-            setToolRunning(null);
-            rawAccum += data.text;
-            const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
-
-            if (!started) {
-              started = true;
-              setLoading(false);
-              setStreaming(true);
-              setDisplayMessages((prev) => [
-                ...prev,
-                { role: "assistant", text: cleanText, toolLogs: [], citations },
-              ]);
-            } else {
-              setDisplayMessages((prev) => {
-                const msgs = [...prev];
-                const last = msgs[msgs.length - 1];
-                return [...msgs.slice(0, -1), { ...last, text: cleanText, citations }];
-              });
-            }
-          } else if (data.type === "tool") {
-            if (!started) {
-              started = true;
-              setLoading(false);
-              setStreaming(true);
-              setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [] }]);
-            }
-            setToolRunning(data.name ?? null);
-            setDisplayMessages((prev) => {
-              const msgs = [...prev];
-              const last = msgs[msgs.length - 1];
-              const toolLogs = [
-                ...(last.toolLogs ?? []),
-                { name: data.name ?? "", input: data.input, result: data.result ?? "" },
-              ];
-              const update: Partial<DisplayMessage> = { toolLogs };
-              if (data.name === "extract_key_facts" && data.input) {
-                update.extractedFacts = data.input as ExtractedFacts;
-              }
-              if (data.name === "draft_document" && data.input) {
-                update.draft = data.input as DocumentDraft;
-              }
-              if (data.name === "flag_risks" && data.input) {
-                update.risks = data.input as DocumentRisks;
-              }
-              if (data.name === "save_legal_context" && data.input) {
-                update.legalContext = data.input as LegalContext;
-              }
-              return [...msgs.slice(0, -1), { ...last, ...update }];
-            });
-          } else if (data.type === "clarification") {
-            if (!started) {
-              started = true;
-              setLoading(false);
-              setStreaming(true);
-              setDisplayMessages((prev) => [
-                ...prev,
-                { role: "assistant", text: "", toolLogs: [], citations: [], clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } },
-              ]);
-            } else {
-              setDisplayMessages((prev) => {
-                const msgs = [...prev];
-                const last = msgs[msgs.length - 1];
-                return [...msgs.slice(0, -1), { ...last, clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } }];
-              });
-            }
-          } else if (data.type === "done") {
-            if (data.history) setHistory(data.history);
-          } else if (data.type === "error") {
-            throw new Error(data.error);
-          }
-        }
-      }
-
-      if (!started) {
-        setDisplayMessages((prev) => [
-          ...prev,
-          { role: "assistant", text: "(no response)", toolLogs: [], citations: [] },
-        ]);
-      }
+      await processStream(res);
     } catch (err) {
       setDisplayMessages((prev) => [
         ...prev,
@@ -1546,7 +1161,6 @@ export default function App() {
   }
 
   async function rejectDraft(msgIndex: number, comment: string) {
-    // Mark the draft as rejected with the attorney's comment.
     setDisplayMessages((prev) => {
       const msgs = [...prev];
       msgs[msgIndex] = {
@@ -1556,103 +1170,20 @@ export default function App() {
       return msgs;
     });
 
-    // Persist the feedback pattern to memory so future analyses benefit from it.
     saveMemory(displayMessages, comment);
 
-    // Feed the feedback back into the conversation as a user message.
     const feedbackMsg = `Please revise the draft based on this feedback:\n\n${comment}`;
-    setInput("");
     setLoading(true);
-
     try {
-      setDisplayMessages((prev) => [
-        ...prev,
-        { role: "user", text: feedbackMsg },
-      ]);
+      setDisplayMessages((prev) => [...prev, { role: "user", text: feedbackMsg }]);
 
       const res = await fetch("http://localhost:3001/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userMessage: feedbackMsg, history }),
       });
-
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      let started = false;
-      let rawAccum = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split("\n\n");
-        buf = parts.pop() ?? "";
-        for (const part of parts) {
-          if (!part.startsWith("data: ")) continue;
-          let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; error?: string; question?: string; reason?: string; canProceed?: boolean; };
-          try { data = JSON.parse(part.slice(6)); } catch { continue; }
-          if (data.type === "chunk") {
-            setToolRunning(null);
-            rawAccum += data.text;
-            const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
-            if (!started) {
-              started = true;
-              setLoading(false);
-              setStreaming(true);
-              setDisplayMessages((prev) => [...prev, { role: "assistant", text: cleanText, toolLogs: [], citations }]);
-            } else {
-              setDisplayMessages((prev) => {
-                const msgs = [...prev];
-                const last = msgs[msgs.length - 1];
-                return [...msgs.slice(0, -1), { ...last, text: cleanText, citations }];
-              });
-            }
-          } else if (data.type === "tool") {
-            if (!started) {
-              started = true;
-              setLoading(false);
-              setStreaming(true);
-              setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [] }]);
-            }
-            setToolRunning(data.name ?? null);
-            setDisplayMessages((prev) => {
-              const msgs = [...prev];
-              const last = msgs[msgs.length - 1];
-              const toolLogs = [...(last.toolLogs ?? []), { name: data.name ?? "", input: data.input, result: data.result ?? "" }];
-              const update: Partial<DisplayMessage> = { toolLogs };
-              if (data.name === "draft_document" && data.input) update.draft = data.input as DocumentDraft;
-              if (data.name === "extract_key_facts" && data.input) update.extractedFacts = data.input as ExtractedFacts;
-              if (data.name === "flag_risks" && data.input) update.risks = data.input as DocumentRisks;
-              if (data.name === "save_legal_context" && data.input) update.legalContext = data.input as LegalContext;
-              return [...msgs.slice(0, -1), { ...last, ...update }];
-            });
-          } else if (data.type === "clarification") {
-            if (!started) {
-              started = true;
-              setLoading(false);
-              setStreaming(true);
-              setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [], clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } }]);
-            } else {
-              setDisplayMessages((prev) => {
-                const msgs = [...prev];
-                const last = msgs[msgs.length - 1];
-                return [...msgs.slice(0, -1), { ...last, clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } }];
-              });
-            }
-          } else if (data.type === "done") {
-            if (data.history) setHistory(data.history as unknown[]);
-          } else if (data.type === "error") {
-            throw new Error(data.error);
-          }
-        }
-      }
-
-      if (!started) {
-        setDisplayMessages((prev) => [...prev, { role: "assistant", text: "(no response)", toolLogs: [], citations: [] }]);
-      }
+      await processStream(res);
     } catch (err) {
       setDisplayMessages((prev) => [...prev, { role: "assistant", text: `Error: ${String(err)}` }]);
     } finally {
@@ -1663,7 +1194,6 @@ export default function App() {
   }
 
   async function answerClarification(msgIndex: number, answer: string) {
-    // Stamp the answer onto the clarification bubble.
     setDisplayMessages((prev) => {
       const msgs = [...prev];
       msgs[msgIndex] = {
@@ -1673,90 +1203,17 @@ export default function App() {
       return msgs;
     });
 
-    // Send the answer as a new user turn so the agent can continue.
     setLoading(true);
     try {
-      setDisplayMessages((prev) => [
-        ...prev,
-        { role: "user", text: answer },
-      ]);
+      setDisplayMessages((prev) => [...prev, { role: "user", text: answer }]);
 
       const res = await fetch("http://localhost:3001/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userMessage: answer, history }),
       });
-
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      let started = false;
-      let rawAccum = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split("\n\n");
-        buf = parts.pop() ?? "";
-        for (const part of parts) {
-          if (!part.startsWith("data: ")) continue;
-          let data: { type: string; text?: string; name?: string; input?: unknown; result?: string; history?: unknown[]; error?: string; question?: string; reason?: string; canProceed?: boolean; };
-          try { data = JSON.parse(part.slice(6)); } catch { continue; }
-          if (data.type === "chunk") {
-            setToolRunning(null);
-            rawAccum += data.text;
-            const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
-            if (!started) {
-              started = true;
-              setLoading(false);
-              setStreaming(true);
-              setDisplayMessages((prev) => [...prev, { role: "assistant", text: cleanText, toolLogs: [], citations }]);
-            } else {
-              setDisplayMessages((prev) => {
-                const msgs = [...prev];
-                const last = msgs[msgs.length - 1];
-                return [...msgs.slice(0, -1), { ...last, text: cleanText, citations }];
-              });
-            }
-          } else if (data.type === "tool") {
-            if (!started) {
-              started = true;
-              setLoading(false);
-              setStreaming(true);
-              setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [] }]);
-            }
-            setToolRunning(data.name ?? null);
-            setDisplayMessages((prev) => {
-              const msgs = [...prev];
-              const last = msgs[msgs.length - 1];
-              const toolLogs = [...(last.toolLogs ?? []), { name: data.name ?? "", input: data.input, result: data.result ?? "" }];
-              const update: Partial<DisplayMessage> = { toolLogs };
-              if (data.name === "extract_key_facts" && data.input) update.extractedFacts = data.input as ExtractedFacts;
-              if (data.name === "draft_document" && data.input) update.draft = data.input as DocumentDraft;
-              if (data.name === "flag_risks" && data.input) update.risks = data.input as DocumentRisks;
-              if (data.name === "save_legal_context" && data.input) update.legalContext = data.input as LegalContext;
-              return [...msgs.slice(0, -1), { ...last, ...update }];
-            });
-          } else if (data.type === "clarification") {
-            setDisplayMessages((prev) => {
-              const msgs = [...prev];
-              const last = msgs[msgs.length - 1];
-              return [...msgs.slice(0, -1), { ...last, clarification: { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true } }];
-            });
-          } else if (data.type === "done") {
-            if (data.history) setHistory(data.history as unknown[]);
-          } else if (data.type === "error") {
-            throw new Error(data.error);
-          }
-        }
-      }
-
-      if (!started) {
-        setDisplayMessages((prev) => [...prev, { role: "assistant", text: "(no response)", toolLogs: [], citations: [] }]);
-      }
+      await processStream(res);
     } catch (err) {
       setDisplayMessages((prev) => [...prev, { role: "assistant", text: `Error: ${String(err)}` }]);
     } finally {
@@ -1773,9 +1230,6 @@ export default function App() {
     }
   }
 
-  // Only the active citation is highlighted — one at a time, no clutter.
-  // highlightKey is read here so a state bump causes a re-render and a new
-  // array reference, which triggers PdfHighlighter.componentDidUpdate.
   const activeDocDims = activeCitation
     ? sessionDocs.find((d) => d.id === activeCitation.docId)?.pageDims
     : null;
@@ -1784,10 +1238,6 @@ export default function App() {
       ? [citationToHighlight(activeCitation, sessionDocs)]
       : [];
 
-  // ── Report export ──────────────────────────────────────────────────────────
-  const [exporting, setExporting] = useState(false);
-
-  // Collect the latest of each card type from all messages.
   const reportData: ReportData | null = (() => {
     let facts: ReportData["facts"];
     let draft: ReportData["draft"];
@@ -1806,7 +1256,6 @@ export default function App() {
     }
 
     if (!facts && !draft && !risks && !legalContext) return null;
-
     return {
       caseName: caseName || "Untitled Case",
       generatedAt: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
@@ -1822,18 +1271,8 @@ export default function App() {
     if (!reportData || exporting) return;
     setExporting(true);
     try {
-      // Lazy-load the heavy PDF renderer only when needed.
-      const [{ pdf }, { ReportPdf }] = await Promise.all([
-        import("@react-pdf/renderer"),
-        import("./ReportPdf.tsx"),
-      ]);
-      const blob = await pdf(<ReportPdf data={reportData} />).toBlob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${reportData.caseName.replace(/[^a-z0-9]/gi, "-").toLowerCase()}-mlex-report.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const filename = `${reportData.caseName.replace(/[^a-z0-9]/gi, "-").toLowerCase()}-mlex-report.pdf`;
+      await generatePdfReport(reportData, filename);
     } finally {
       setExporting(false);
     }
@@ -2109,33 +1548,12 @@ export default function App() {
             </button>
           </div>
           <div className="preview-body">
-            <PdfLoader url={previewPdf.url} workerSrc={WORKER_SRC} beforeLoad={<div className="pdf-loading">Loading…</div>}>
-              {(pdfDocument) => (
-                <PdfHighlighter
-                  pdfDocument={pdfDocument}
-                  highlights={highlights}
-                  onScrollChange={() => {}}
-                  scrollRef={handleScrollRef}
-                  pdfScaleValue="page-width"
-                  onSelectionFinished={() => null}
-                  enableAreaSelection={() => false}
-                  highlightTransform={(highlight, _index, _setTip, _hideTip, _viewportToScaled, _screenshot, isScrolledTo) => (
-                    <Popup
-                      popupContent={<div className="highlight-popup">{highlight.comment.text}</div>}
-                      onMouseOver={() => {}}
-                      onMouseOut={() => {}}
-                      key={highlight.id}
-                    >
-                      <Highlight
-                        isScrolledTo={isScrolledTo || highlight.id === String(activeCitation?.id)}
-                        position={highlight.position}
-                        comment={highlight.comment}
-                      />
-                    </Popup>
-                  )}
-                />
-              )}
-            </PdfLoader>
+            <PdfViewerPane
+              url={previewPdf.url}
+              highlights={highlights}
+              activeCitationId={activeCitation ? String(activeCitation.id) : null}
+              onScrollRef={handleScrollRef}
+            />
           </div>
         </div>
       )}
