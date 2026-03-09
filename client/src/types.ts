@@ -106,6 +106,15 @@ export interface LegalContext {
   findings: LegalFinding[];
 }
 
+export interface QualityResult {
+  facts_adequate: boolean;
+  draft_adequate: boolean;
+  risks_adequate: boolean;
+  research_adequate: boolean;
+  gaps: string[];
+  overall_ready: boolean;
+}
+
 export interface CaseMemory {
   caseId: string;
   caseName: string;
@@ -155,4 +164,7 @@ export interface DisplayMessage {
   legalContext?: LegalContext;
   clarification?: ClarificationRequest;
   isIntake?: boolean;   // true when triggered by the file watcher, not the user
+  agentLabel?: string;    // e.g. "Analyst", "Researcher", "Drafter" — for multi-agent bubbles
+  toolRunning?: string;   // currently-running tool name for this bubble's spinner
+  qualityResult?: QualityResult; // captured from assess_quality tool
 }

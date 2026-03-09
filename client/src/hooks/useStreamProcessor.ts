@@ -1,9 +1,20 @@
 // Shared SSE stream processor — eliminates the duplicated streaming loop across all 4 send handlers.
-import type { DisplayMessage, ExtractedFacts, DocumentDraft, DocumentRisks, LegalContext, ConversationTurn } from "../types.ts";
+import type { DisplayMessage, ExtractedFacts, DocumentDraft, DocumentRisks, LegalContext, QualityResult, ConversationTurn } from "../types.ts";
 import { parseCitations, stripPlanningPhrases } from "../utils/citations.ts";
+
+// Static label map — used when creating fallback bubbles (no prior agent_start)
+const AGENT_LABELS: Record<string, string> = {
+  analyst:    "Analyst",
+  researcher: "Researcher",
+  drafter:    "Drafter",
+  quality:    "Quality",
+  main:       "MLex",
+};
 
 type SSEData = {
   type: string;
+  agentId?: string;
+  label?: string;
   text?: string;
   name?: string;
   input?: unknown;
@@ -40,8 +51,39 @@ export function useStreamProcessor({
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buf = "";
-    let started = false;
-    let rawAccum = "";
+    let anyStarted = false;
+
+    // Per-agent tracking — keyed by agentId
+    // agentSeen: synchronous check (updated immediately, not deferred inside setState)
+    // agentMsgIndex: actual array index, only reliable inside setState callbacks
+    const agentSeen     = new Set<string>();
+    const agentMsgIndex = new Map<string, number>();
+    const agentRawAccum = new Map<string, string>();
+
+    function ensureBubble(agentId: string, label?: string) {
+      if (agentSeen.has(agentId)) return;
+      agentSeen.add(agentId);
+      if (!anyStarted) {
+        anyStarted = true;
+        setLoading(false);
+        setStreaming(true);
+      }
+      const resolvedLabel = label ?? AGENT_LABELS[agentId] ?? agentId;
+      setDisplayMessages((prev) => {
+        agentMsgIndex.set(agentId, prev.length);
+        return [...prev, { role: "assistant", text: "", toolLogs: [], citations: [], agentLabel: resolvedLabel }];
+      });
+    }
+
+    function updateMsgAt(agentId: string, updater: (msg: DisplayMessage) => DisplayMessage) {
+      setDisplayMessages((prev) => {
+        const idx = agentMsgIndex.get(agentId);
+        if (idx === undefined) return prev;
+        const msgs = [...prev];
+        msgs[idx] = updater(msgs[idx]);
+        return msgs;
+      });
+    }
 
     while (true) {
       const { done, value } = await reader.read();
@@ -55,55 +97,40 @@ export function useStreamProcessor({
         let data: SSEData;
         try { data = JSON.parse(part.slice(6)); } catch { continue; }
 
-        if (data.type === "chunk") {
-          setToolRunning(null);
-          rawAccum += data.text;
-          const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(rawAccum));
-          if (!started) {
-            started = true;
-            setLoading(false);
-            setStreaming(true);
-            setDisplayMessages((prev) => [...prev, { role: "assistant", text: cleanText, toolLogs: [], citations }]);
-          } else {
-            setDisplayMessages((prev) => {
-              const msgs = [...prev];
-              const last = msgs[msgs.length - 1];
-              return [...msgs.slice(0, -1), { ...last, text: cleanText, citations }];
-            });
-          }
+        if (data.type === "agent_start") {
+          const agentId = data.agentId ?? "main";
+          const label = data.label ?? AGENT_LABELS[agentId] ?? agentId;
+          agentRawAccum.set(agentId, "");
+          ensureBubble(agentId, label);
+
+        } else if (data.type === "chunk") {
+          const agentId = data.agentId ?? "main";
+          ensureBubble(agentId);
+          const raw = (agentRawAccum.get(agentId) ?? "") + (data.text ?? "");
+          agentRawAccum.set(agentId, raw);
+          const { text: cleanText, citations } = parseCitations(stripPlanningPhrases(raw));
+          updateMsgAt(agentId, (msg) => ({ ...msg, text: cleanText, citations, toolRunning: undefined }));
+
         } else if (data.type === "tool") {
-          if (!started) {
-            started = true;
-            setLoading(false);
-            setStreaming(true);
-            setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [] }]);
-          }
-          setToolRunning(data.name ?? null);
-          setDisplayMessages((prev) => {
-            const msgs = [...prev];
-            const last = msgs[msgs.length - 1];
-            const toolLogs = [...(last.toolLogs ?? []), { name: data.name ?? "", input: data.input, result: data.result ?? "" }];
-            const update: Partial<DisplayMessage> = { toolLogs };
+          const agentId = data.agentId ?? "main";
+          ensureBubble(agentId);
+          updateMsgAt(agentId, (msg) => {
+            const toolLogs = [...(msg.toolLogs ?? []), { name: data.name ?? "", input: data.input, result: data.result ?? "" }];
+            const update: Partial<DisplayMessage> = { toolLogs, toolRunning: data.name };
             if (data.name === "extract_key_facts" && data.input) update.extractedFacts = data.input as ExtractedFacts;
-            if (data.name === "draft_document" && data.input) update.draft = data.input as DocumentDraft;
-            if (data.name === "flag_risks" && data.input) update.risks = data.input as DocumentRisks;
-            if (data.name === "save_legal_context" && data.input) update.legalContext = data.input as LegalContext;
-            return [...msgs.slice(0, -1), { ...last, ...update }];
+            if (data.name === "draft_document"     && data.input) update.draft = data.input as DocumentDraft;
+            if (data.name === "flag_risks"          && data.input) update.risks = data.input as DocumentRisks;
+            if (data.name === "save_legal_context"  && data.input) update.legalContext = data.input as LegalContext;
+            if (data.name === "assess_quality"      && data.input) update.qualityResult = data.input as QualityResult;
+            return { ...msg, ...update };
           });
+
         } else if (data.type === "clarification") {
+          const agentId = data.agentId ?? "main";
           const clarification = { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true };
-          if (!started) {
-            started = true;
-            setLoading(false);
-            setStreaming(true);
-            setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [], clarification }]);
-          } else {
-            setDisplayMessages((prev) => {
-              const msgs = [...prev];
-              const last = msgs[msgs.length - 1];
-              return [...msgs.slice(0, -1), { ...last, clarification }];
-            });
-          }
+          ensureBubble(agentId);
+          updateMsgAt(agentId, (msg) => ({ ...msg, clarification }));
+
         } else if (data.type === "done") {
           if (data.history) setHistory(data.history);
         } else if (data.type === "error") {
@@ -112,7 +139,7 @@ export function useStreamProcessor({
       }
     }
 
-    if (!started) {
+    if (!anyStarted) {
       setDisplayMessages((prev) => [...prev, { role: "assistant", text: "(no response)", toolLogs: [], citations: [] }]);
     }
   }
