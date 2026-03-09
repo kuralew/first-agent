@@ -52,12 +52,14 @@ You have these tools available:
 • assess_quality      — self-review your analysis for completeness and gaps
 • request_clarification — ask the user for specific missing information
 
-MATCH TOOLS TO THE REQUEST — do not blindly run the full chain every time:
+MATCH TOOLS TO THE REQUEST:
 
-Full document analysis (default when a new document is uploaded):
+When one or more documents are uploaded, you MUST ALWAYS run the full chain — no exceptions:
   extract_key_facts → draft_document → flag_risks → search_legal → save_legal_context → assess_quality
 
-Targeted requests — use only what's needed:
+Skipping draft_document or any other step in the chain when a document is present is an error.
+
+Targeted requests (no document, follow-up only) — use only what's needed:
   "What are the key risks?"      → extract_key_facts (if not done) → flag_risks
   "Draft a response"             → draft_document only
   "Search for case law on X"     → search_legal → save_legal_context
@@ -67,11 +69,8 @@ Targeted requests — use only what's needed:
 Missing critical information (jurisdiction, missing exhibit, unclear scope):
   → request_clarification FIRST, then proceed based on the answer
 
-Ambiguous document type:
-  → extract_key_facts first, then assess what else is needed
-
-Do NOT call tools the request doesn't need.
-Do NOT skip tools that are clearly needed for a full analysis.
+Do NOT skip any tool in the full chain when a document is present.
+Do NOT call tools the request doesn't need for follow-up questions.
 
 ─────────────────────────────────────────────────
 QUALITY GATE
@@ -187,6 +186,9 @@ export async function runAgentStream(
 
       // Stop the loop if clarification blocks progress.
       if (pauseForClarification) return;
+
+      // Brief pause between iterations to stay within the per-minute token rate limit.
+      await new Promise((r) => setTimeout(r, 2000));
 
       continue;
     }

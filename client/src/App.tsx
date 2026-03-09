@@ -287,8 +287,8 @@ function FactsCard({
 
   // Renders plain text, converting any embedded [d1·p2·...] tags into ↗ buttons.
   // Uses the shared citationCounter from the enclosing scope so IDs never collide.
-  const renderInlineText = (text: string) => {
-    const parts = text.split(/(\[d\d+·[^\]]+\])/g);
+  const renderInlineText = (text: string | undefined) => {
+    const parts = (text ?? "").split(/(\[d\d+·[^\]]+\])/g);
     return parts.map((part, i) => {
       if (/^\[d\d+·/.test(part)) {
         const c = parseSingleTag(part, citationCounter++);
@@ -592,8 +592,8 @@ function RisksCard({
     );
   }
 
-  const renderInlineText = (text: string) => {
-    const parts = text.split(/(\[d\d+·[^\]]+\])/g);
+  const renderInlineText = (text: string | undefined) => {
+    const parts = (text ?? "").split(/(\[d\d+·[^\]]+\])/g);
     return parts.map((part, i) => {
       if (/^\[d\d+·/.test(part)) {
         const c = parseSingleTag(part, citationCounter++);
@@ -1302,6 +1302,12 @@ export default function App() {
               });
             }
           } else if (data.type === "tool") {
+            if (!started) {
+              started = true;
+              setLoading(false);
+              setStreaming(true);
+              setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [] }]);
+            }
             setToolRunning(data.name ?? null);
             setDisplayMessages((prev) => {
               const msgs = [...prev];
@@ -1457,6 +1463,12 @@ export default function App() {
               });
             }
           } else if (data.type === "tool") {
+            if (!started) {
+              started = true;
+              setLoading(false);
+              setStreaming(true);
+              setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [] }]);
+            }
             setToolRunning(data.name ?? null);
             setDisplayMessages((prev) => {
               const msgs = [...prev];
@@ -1599,6 +1611,12 @@ export default function App() {
               });
             }
           } else if (data.type === "tool") {
+            if (!started) {
+              started = true;
+              setLoading(false);
+              setStreaming(true);
+              setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [] }]);
+            }
             setToolRunning(data.name ?? null);
             setDisplayMessages((prev) => {
               const msgs = [...prev];
@@ -1704,6 +1722,12 @@ export default function App() {
               });
             }
           } else if (data.type === "tool") {
+            if (!started) {
+              started = true;
+              setLoading(false);
+              setStreaming(true);
+              setDisplayMessages((prev) => [...prev, { role: "assistant", text: "", toolLogs: [], citations: [] }]);
+            }
             setToolRunning(data.name ?? null);
             setDisplayMessages((prev) => {
               const msgs = [...prev];

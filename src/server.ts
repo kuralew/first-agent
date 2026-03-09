@@ -280,13 +280,28 @@ app.post("/chat/stream", async (req, res) => {
 
   const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
+  // Keep doc text under ~4k tokens. The agentic loop re-sends history on every
+  // tool call, so large inputs compound quickly against the per-minute token limit.
+  const MAX_DOC_CHARS = 16_000;
+  // Only keep the last 6 message pairs (12 messages) to prevent history bloat
+  // from previous long document analyses overflowing the token budget.
+  const MAX_HISTORY = 12;
+
   try {
-    const userText = docText
-      ? `${userMessage || "Please analyze these documents."}\n\n${docText}`
+    const truncatedDoc = docText && docText.length > MAX_DOC_CHARS
+      ? docText.slice(0, MAX_DOC_CHARS) + "\n\n[Document truncated to fit token limit]"
+      : docText;
+
+    const userText = truncatedDoc
+      ? `${userMessage || "Please analyze these documents."}\n\n${truncatedDoc}`
       : userMessage;
 
+    const trimmedHistory = history.length > MAX_HISTORY
+      ? history.slice(-MAX_HISTORY)
+      : history;
+
     const messages: Anthropic.MessageParam[] = [
-      ...history,
+      ...trimmedHistory,
       { role: "user", content: userText },
     ];
 
