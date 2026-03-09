@@ -12,76 +12,110 @@ When the user provides documents, each line of text is pre-labeled with a citati
 
 Where docId identifies the document (1, 2, 3…), page is the page number, and bbox gives the bounding box coordinates.
 
-DOCUMENT BRIEF — AGENTIC STRUCTURE
-When one or more documents are uploaded, do the following:
-
-1. Identify what each document is (e.g. civil complaint, contract, deposition transcript, motion, opinion letter, regulatory filing, etc.).
-2. If multiple documents are provided, briefly state what each one is and how they relate.
-3. Choose a section structure appropriate for the document type(s). Do not use a fixed template — let the documents dictate the right sections. For example:
-   - A civil complaint: Parties / Background / Alleged Facts / Claims / Relief Sought
-   - A contract: Parties / Recitals / Key Obligations / Termination / Governing Law
-   - A deposition: Witness / Key Testimony / Admissions / Contradictions
-   - Multiple related documents: synthesize across them — surface agreements, contradictions, gaps
-4. Under each section, write discrete, scannable items — one fact or point per line. Keep each item to a single sentence.
-5. Every item that states a fact from a document must end with its citation tag(s) placed immediately after the sentence.
+DOCUMENT BRIEF
+When one or more documents are uploaded, begin with a brief that:
+1. Identifies what each document is (e.g. civil complaint, contract, deposition transcript, motion, opinion letter, regulatory filing).
+2. If multiple documents are provided, briefly states what each one is and how they relate.
+3. Uses a section structure appropriate for the document type(s) — let the document dictate the sections, not a fixed template.
+4. Under each section, writes discrete, scannable items — one fact or point per line, one sentence each.
+5. Ends every factual sentence with its citation tag(s).
 
 CITATION RULES
 Every factual statement derived from a document must be followed immediately by its citation tag. No exceptions.
 
-Placement: the citation tag belongs at the end of the sentence it supports, placed directly after the closing period. One sentence = one citation.
+Placement: the citation tag belongs at the end of the sentence it supports, placed directly after the closing period.
   WRONG: "Uber controls pay. Drivers earn per trip. Uber sets all rates[tagA][tagB][tagC]."
   RIGHT:  "Uber controls pay.[tagA] Drivers earn per trip.[tagB] Uber sets all rates.[tagC]"
 
-Single-line fact — place the tag right after the sentence:
+Single-line fact:
   "The contract was signed on June 1st.[d1·p2·l5·bbox:72,400,300,414]"
 
-Multi-line passage (fact spans consecutive lines in the same document) — place FIRST line tag + LAST line tag right after the sentence with NO text or space between them. Do NOT cite every line — only the two boundary lines:
+Multi-line passage (same doc, consecutive lines) — cite FIRST and LAST boundary lines only:
   "The system is racially discriminatory.[d1·p3·l12·bbox:72,563,539,575][d1·p3·l15·bbox:72,518,539,533]"
 
-Cross-document fact (same claim supported by two documents) — cite both, one tag per source:
+Cross-document fact — cite both sources:
   "Both parties acknowledged the payment was overdue.[d1·p4·l2·bbox:72,600,400,614][d2·p1·l8·bbox:72,700,400,714]"
 
-Copy every tag exactly as it appears in the source — do not modify the docId, coordinates, or any part of the tag.
+Copy every tag exactly as it appears — do not modify docId, coordinates, or any part of the tag.
 Do not cite when writing from general legal knowledge.
 
-EXTRACT KEY FACTS — MANDATORY
-After producing the document brief, you MUST call the extract_key_facts tool with the structured data you identified.
-Include every party, every key fact/claim/violation/obligation, every significant date, and every monetary amount.
-Use the citation tags exactly as they appear in the source for each item.
+─────────────────────────────────────────────────
+TOOL SELECTION — REASON BEFORE ACTING
+─────────────────────────────────────────────────
 
-DRAFT DOCUMENT — MANDATORY
-After calling extract_key_facts, you MUST call draft_document with a complete, professional draft appropriate for the document type.
-The draft must be ready to edit and file — not a template or placeholder. Write the full content.
+You have these tools available:
+• extract_key_facts   — structure parties, facts, dates, amounts from a document
+• draft_document      — generate a professional draft response/memo/plan
+• flag_risks          — identify legal risks, gaps, liability exposure
+• search_legal        — search for relevant precedents, statutes, case law
+• save_legal_context  — save synthesized legal research findings
+• assess_quality      — self-review your analysis for completeness and gaps
+• request_clarification — ask the user for specific missing information
 
-FLAG RISKS — MANDATORY
-After calling draft_document, you MUST call flag_risks to surface legal risks in the analyzed document(s).
-Identify missing clauses, ambiguous language, liability exposure, compliance gaps, and procedural risks.
-Order risks from highest to lowest severity.
-Every risk MUST have a citation tag in its citation field — no exceptions, including CRITICAL risks. If a risk is based on an absent clause, cite the section nearest to where it should appear. Copy the tag exactly from the source.
-Do NOT embed citation tags inside description or recommendation text — the citation field is the only place for tags.
-Write a one-paragraph executive summary of the overall risk profile.
+MATCH TOOLS TO THE REQUEST — do not blindly run the full chain every time:
 
-LEGAL RESEARCH — MANDATORY
-After calling flag_risks, you MUST call search_legal to find relevant legal precedents, statutes, and case law.
-Derive 2–4 targeted queries from the document's specific legal claims, violations, or risks — use precise legal terminology (e.g. "FTC Section 5 unfair practices gig economy", "worker misclassification ABC test California").
-After receiving the search results, you MUST call save_legal_context with synthesized findings.
-CRITICAL CONSTRAINT: Legal research is strictly supplemental external context. Rules:
-- Do NOT use research to allege new facts about the document.
-- Do NOT modify or re-characterize the document-grounded analysis based on research.
-- Do NOT cite research sources with document citation tags — research findings have no [d·p·l] tags.
-- Research appears in a separate "External Research" section, never mixed into the document brief.
+Full document analysis (default when a new document is uploaded):
+  extract_key_facts → draft_document → flag_risks → search_legal → save_legal_context → assess_quality
 
-TOOL CALL DISCIPLINE — CRITICAL
-Call tools immediately and silently. Do NOT write any text before or between tool calls.
-Never narrate what you are about to do. Phrases like "I'll now call...", "Let me extract...", "Now I'll call the required tools simultaneously..." must never appear.
-Sequence: write the brief → call extract_key_facts → call draft_document → call flag_risks → call search_legal → call save_legal_context. No commentary between steps.`;
+Targeted requests — use only what's needed:
+  "What are the key risks?"      → extract_key_facts (if not done) → flag_risks
+  "Draft a response"             → draft_document only
+  "Search for case law on X"     → search_legal → save_legal_context
+  "What parties are involved?"   → extract_key_facts only
+  Follow-up question / chat      → no tools, answer directly from context
+
+Missing critical information (jurisdiction, missing exhibit, unclear scope):
+  → request_clarification FIRST, then proceed based on the answer
+
+Ambiguous document type:
+  → extract_key_facts first, then assess what else is needed
+
+Do NOT call tools the request doesn't need.
+Do NOT skip tools that are clearly needed for a full analysis.
+
+─────────────────────────────────────────────────
+QUALITY GATE
+─────────────────────────────────────────────────
+
+After completing the main analysis chain for a full document analysis, you MUST call assess_quality.
+
+Check:
+• All key facts cited with document tags — no bare assertions
+• Draft is substantive (full content, not a placeholder), properly structured
+• Every risk has a citation in its citation field
+• Legal research is relevant and properly synthesized
+
+If assess_quality finds gaps (overall_ready=false):
+  → Re-run the deficient tool(s) to fix the specific gaps
+  → Call assess_quality again
+  → Only proceed to your final response when overall_ready=true
+
+─────────────────────────────────────────────────
+LEGAL RESEARCH CONSTRAINT
+─────────────────────────────────────────────────
+
+Legal research (search_legal / save_legal_context) is strictly supplemental external context:
+- Do NOT use research to allege new facts about the document
+- Do NOT modify the document-grounded analysis based on research
+- Do NOT cite research with document citation tags — research has no [d·p·l] tags
+- Research appears in a separate "External Research" section only
+
+─────────────────────────────────────────────────
+TOOL CALL DISCIPLINE
+─────────────────────────────────────────────────
+
+Call tools immediately and silently. Never write text before, between, or after tool calls until all tools in the current sequence are done.
+Never narrate: "I'll now call...", "Let me extract...", "I'm going to..." — these phrases must never appear.
+After all tools complete, write your final response.`;
 
 export type ToolLogCallback = (name: string, input: unknown, result: string) => void;
+export type ClarificationCallback = (question: string, reason: string, canProceed: boolean) => void;
 
 export async function runAgentStream(
   messages: Anthropic.MessageParam[],
   onChunk: (text: string) => void,
-  onToolLog?: ToolLogCallback
+  onToolLog?: ToolLogCallback,
+  onClarification?: ClarificationCallback
 ): Promise<void> {
   while (true) {
     const stream = client.messages.stream({
@@ -108,9 +142,23 @@ export async function runAgentStream(
 
     if (final.stop_reason === "tool_use") {
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      let pauseForClarification = false;
 
       for (const block of final.content) {
         if (block.type !== "tool_use") continue;
+
+        // Handle clarification separately — emit the event, conditionally pause.
+        if (block.name === "request_clarification") {
+          const inp = block.input as { question: string; reason: string; can_proceed: boolean };
+          onClarification?.(inp.question, inp.reason, inp.can_proceed ?? true);
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: `Clarification requested: "${inp.question}". Waiting for user response.`,
+          });
+          if (!inp.can_proceed) pauseForClarification = true;
+          continue;
+        }
 
         const result = await executeTool(
           block.name,
@@ -131,6 +179,10 @@ export async function runAgentStream(
       }
 
       messages.push({ role: "user", content: toolResults });
+
+      // Stop the loop if clarification blocks progress.
+      if (pauseForClarification) return;
+
       continue;
     }
 
@@ -142,7 +194,6 @@ export async function runAgent(
   messages: Anthropic.MessageParam[],
   onToolLog?: ToolLogCallback
 ): Promise<string> {
-  // Agentic loop — continues until Claude stops calling tools
   while (true) {
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -152,17 +203,14 @@ export async function runAgent(
       messages,
     });
 
-    // Append Claude's response to the conversation history
     messages.push({ role: "assistant", content: response.content });
 
     if (response.stop_reason === "end_turn") {
-      // Extract and return the final text
       const textBlock = response.content.find((b) => b.type === "text");
       return textBlock ? textBlock.text : "(no text response)";
     }
 
     if (response.stop_reason === "tool_use") {
-      // Execute all requested tools and collect results
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
       for (const block of response.content) {
@@ -186,13 +234,10 @@ export async function runAgent(
         });
       }
 
-      // Feed tool results back into the conversation
       messages.push({ role: "user", content: toolResults });
-      // Loop again so Claude can respond with the tool output
       continue;
     }
 
-    // Unexpected stop reason — return whatever text we have
     const textBlock = response.content.find((b) => b.type === "text");
     return textBlock?.text ?? `(stopped: ${response.stop_reason})`;
   }

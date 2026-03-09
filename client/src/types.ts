@@ -118,6 +118,13 @@ export interface SavedCase extends CaseListItem {
   displayMessages: DisplayMessage[];
 }
 
+export interface ClarificationRequest {
+  question: string;
+  reason: string;
+  canProceed: boolean;
+  answer?: string;  // set when the user has answered
+}
+
 export interface DisplayMessage {
   role: "user" | "assistant";
   text: string;
@@ -129,5 +136,6 @@ export interface DisplayMessage {
   draftReview?: DraftReview;
   risks?: DocumentRisks;
   legalContext?: LegalContext;
+  clarification?: ClarificationRequest;
   isIntake?: boolean;   // true when triggered by the file watcher, not the user
 }

@@ -1843,3 +1843,115 @@ body {
 .legal-source-link:hover {
   background: #DDD6FE;
 }
+
+/* ── Clarification card ───────────────────────────────────────────────────── */
+
+.clarification-card {
+  background: #FFFBEB;
+  border: 1.5px solid #F59E0B;
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 0.75rem;
+}
+
+.clarification-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
+}
+
+.clarification-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #F59E0B;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.clarification-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #92400E;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.clarification-question {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #1F2937;
+  margin-bottom: 0.35rem;
+  line-height: 1.45;
+}
+
+.clarification-reason {
+  font-size: 0.79rem;
+  color: #78716C;
+  margin-bottom: 0.7rem;
+  line-height: 1.45;
+}
+
+.clarification-input-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.clarification-input {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.7rem;
+  border: 1.5px solid #F59E0B;
+  border-radius: 6px;
+  background: #fff;
+  color: #1F2937;
+  outline: none;
+}
+
+.clarification-input:focus {
+  border-color: #D97706;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
+}
+
+.clarification-submit-btn {
+  padding: 0.45rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: #F59E0B;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.clarification-submit-btn:hover:not(:disabled) {
+  background: #D97706;
+}
+
+.clarification-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.clarification-answered {
+  font-size: 0.84rem;
+  color: #374151;
+  background: #FEF3C7;
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.clarification-answered-label {
+  font-weight: 600;
+  color: #92400E;
+  flex-shrink: 0;
+}
