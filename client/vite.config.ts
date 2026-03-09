@@ -8,10 +8,11 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/chat": {
-        target: "http://localhost:3001",
-        changeOrigin: true,
-      },
+      "/chat":     { target: "http://localhost:3001", changeOrigin: true },
+      "/events":   { target: "http://localhost:3001", changeOrigin: true },
+      "/cases":    { target: "http://localhost:3001", changeOrigin: true },
+      "/memories": { target: "http://localhost:3001", changeOrigin: true },
+      "/inbox":    { target: "http://localhost:3001", changeOrigin: true },
     },
   },
 });

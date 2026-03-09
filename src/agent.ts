@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { toolDefinitions, executeTool } from "./tools.js";
+import { MODEL, TOOL_DELAY_MS } from "./config.js";
 
 const client = new Anthropic({
   defaultHeaders: { "anthropic-beta": "pdfs-2024-09-25" },
@@ -110,6 +111,35 @@ After all tools complete, write your final response.`;
 export type ToolLogCallback = (name: string, input: unknown, result: string) => void;
 export type ClarificationCallback = (question: string, reason: string, canProceed: boolean) => void;
 
+const MAX_RETRIES = 3;
+
+async function streamWithRetry(
+  params: Parameters<typeof client.messages.stream>[0],
+  onChunk: (text: string) => void
+): Promise<Anthropic.Message> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const stream = client.messages.stream(params);
+      for await (const event of stream) {
+        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+          onChunk(event.delta.text);
+        }
+      }
+      return await stream.finalMessage();
+    } catch (err) {
+      const is429 = err instanceof Anthropic.APIError && err.status === 429;
+      if (is429 && attempt < MAX_RETRIES) {
+        const wait = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s
+        console.log(`[429] Rate limited. Retrying in ${wait}ms… (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("Max retries exceeded");
+}
+
 export async function runAgentStream(
   messages: Anthropic.MessageParam[],
   onChunk: (text: string) => void,
@@ -122,24 +152,13 @@ export async function runAgentStream(
     : SYSTEM_PROMPT;
 
   while (true) {
-    const stream = client.messages.stream({
-      model: "claude-sonnet-4-6",
+    const final = await streamWithRetry({
+      model: MODEL,
       max_tokens: 8000,
       system: systemPrompt,
       tools: toolDefinitions,
       messages,
-    });
-
-    for await (const event of stream) {
-      if (
-        event.type === "content_block_delta" &&
-        event.delta.type === "text_delta"
-      ) {
-        onChunk(event.delta.text);
-      }
-    }
-
-    const final = await stream.finalMessage();
+    }, onChunk);
     messages.push({ role: "assistant", content: final.content });
 
     if (final.stop_reason === "end_turn") return;
@@ -188,7 +207,7 @@ export async function runAgentStream(
       if (pauseForClarification) return;
 
       // Brief pause between iterations to stay within the per-minute token rate limit.
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, TOOL_DELAY_MS));
 
       continue;
     }
@@ -203,7 +222,7 @@ export async function runAgent(
 ): Promise<string> {
   while (true) {
     const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
+      model: MODEL,
       max_tokens: 8000,
       system: SYSTEM_PROMPT,
       tools: toolDefinitions,

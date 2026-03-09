@@ -124,8 +124,14 @@ export interface CaseListItem {
   updatedAt: string;
 }
 
+/** Typed Anthropic conversation turn — mirrors MessageParam without importing the SDK on the client. */
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  content: unknown;
+}
+
 export interface SavedCase extends CaseListItem {
-  history: unknown[];
+  history: ConversationTurn[];
   displayMessages: DisplayMessage[];
 }
 

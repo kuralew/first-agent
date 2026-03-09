@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { watch } from "chokidar";
 import type Anthropic from "@anthropic-ai/sdk";
 import { runAgent, runAgentStream } from "./agent.js";
+import { PORT, MAX_DOC_CHARS, MAX_HISTORY } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -20,6 +21,7 @@ app.use(
 
 // ── Intake inbox ─────────────────────────────────────────────────────────────
 
+// Use the sibling-level inbox (C:/repos/inbox) — that is where users drop files.
 const inboxDir = path.join(__dirname, "../../inbox");
 if (!fs.existsSync(inboxDir)) fs.mkdirSync(inboxDir, { recursive: true });
 
@@ -31,7 +33,14 @@ const sseClients = new Set<express.Response>();
 
 function broadcast(data: object) {
   const msg = `data: ${JSON.stringify(data)}\n\n`;
-  for (const client of sseClients) client.write(msg);
+  for (const client of sseClients) {
+    try {
+      client.write(msg);
+    } catch (err) {
+      console.warn("[sse] Dead client removed:", err);
+      sseClients.delete(client);
+    }
+  }
 }
 
 // Persistent SSE endpoint — client connects once on mount and listens.
@@ -41,21 +50,28 @@ app.get("/events", (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
   sseClients.add(res);
-  req.on("close", () => sseClients.delete(res));
+  console.log(`[sse] Client connected. Total: ${sseClients.size}`);
+  req.on("close", () => {
+    sseClients.delete(res);
+    console.log(`[sse] Client disconnected. Total: ${sseClients.size}`);
+  });
 });
 
-// Watch inbox — when a PDF drops, broadcast to all connected clients.
+// Watch inbox — when a PDF drops (new file or overwrite), broadcast to all connected clients.
+function handleInboxFile(filePath: string) {
+  if (!filePath.toLowerCase().endsWith(".pdf")) return;
+  const filename = path.basename(filePath);
+  console.log(`[intake] Document detected: ${filename}`);
+  broadcast({ type: "new_document", filename, url: `/inbox/${encodeURIComponent(filename)}` });
+}
+
 watch(inboxDir, { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 1200 } })
-  .on("add", (filePath) => {
-    if (!filePath.toLowerCase().endsWith(".pdf")) return;
-    const filename = path.basename(filePath);
-    console.log(`[intake] New document detected: ${filename}`);
-    broadcast({ type: "new_document", filename, url: `/inbox/${encodeURIComponent(filename)}` });
-  });
+  .on("add", handleInboxFile)
+  .on("change", handleInboxFile);
 
 // ── Case memory ──────────────────────────────────────────────────────────────
 
-const memoriesDir = path.join(__dirname, "../../memories");
+const memoriesDir = path.join(__dirname, "../memories");
 if (!fs.existsSync(memoriesDir)) fs.mkdirSync(memoriesDir, { recursive: true });
 
 interface CaseMemory {
@@ -150,7 +166,7 @@ app.post("/memories", (req, res) => {
 
 // ── Case storage ─────────────────────────────────────────────────────────────
 
-const casesDir = path.join(__dirname, "../../cases");
+const casesDir = path.join(__dirname, "../cases");
 if (!fs.existsSync(casesDir)) fs.mkdirSync(casesDir, { recursive: true });
 
 function sanitizeCaseId(id: string) {
@@ -280,12 +296,7 @@ app.post("/chat/stream", async (req, res) => {
 
   const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
-  // Keep doc text under ~4k tokens. The agentic loop re-sends history on every
-  // tool call, so large inputs compound quickly against the per-minute token limit.
-  const MAX_DOC_CHARS = 16_000;
-  // Only keep the last 6 message pairs (12 messages) to prevent history bloat
-  // from previous long document analyses overflowing the token budget.
-  const MAX_HISTORY = 12;
+  // MAX_DOC_CHARS and MAX_HISTORY are imported from config.ts
 
   try {
     const truncatedDoc = docText && docText.length > MAX_DOC_CHARS
@@ -324,14 +335,21 @@ app.post("/chat/stream", async (req, res) => {
   }
 });
 
+// Debug: manually trigger a broadcast to test SSE end-to-end
+app.get("/debug/test-intake", (_req, res) => {
+  const connected = sseClients.size;
+  broadcast({ type: "new_document", filename: "debug-test.pdf", url: "/inbox/employment-contract-1-stma.pdf" });
+  console.log(`[debug] Manual broadcast sent to ${connected} client(s)`);
+  res.json({ ok: true, clientsNotified: connected });
+});
+
 // Serve built client in production
-const clientDist = path.join(__dirname, "../../client/dist");
+const clientDist = path.join(__dirname, "../client/dist");
 app.use(express.static(clientDist));
 app.get("*", (_req, res) => {
   res.sendFile(path.join(clientDist, "index.html"));
 });
 
-const PORT = 3001;
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
