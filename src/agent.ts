@@ -113,7 +113,7 @@ export type ClarificationCallback = (question: string, reason: string, canProcee
 
 const MAX_RETRIES = 3;
 
-async function streamWithRetry(
+export async function streamWithRetry(
   params: Parameters<typeof client.messages.stream>[0],
   onChunk: (text: string) => void
 ): Promise<Anthropic.Message> {

@@ -731,6 +731,25 @@ body {
 
 /* ── Tool logs ───────────────────────────────────── */
 
+/* ── Agent label badge ──────────────────────────────────────────────────────── */
+
+.agent-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #1B3A6B;
+  background: rgba(27, 58, 107, 0.08);
+  border: 1px solid rgba(27, 58, 107, 0.18);
+  border-radius: 4px;
+  padding: 0.15rem 0.45rem;
+  margin-bottom: 0.1rem;
+  align-self: flex-start;
+}
+
 .tool-logs {
   font-size: 0.8rem;
   border: 1px solid #E5DDD8;
@@ -1851,6 +1870,74 @@ body {
 }
 
 /* ── Clarification card ───────────────────────────────────────────────────── */
+
+/* ── Quality result card ────────────────────────────────────────────────────── */
+
+.quality-card {
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  font-size: 0.82rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.quality-card--pass {
+  background: #F0FDF4;
+  border: 1.5px solid #22C55E;
+}
+
+.quality-card--fail {
+  background: #FFF7ED;
+  border: 1.5px solid #F97316;
+}
+
+.quality-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.quality-card--pass .quality-card-icon { color: #16A34A; }
+.quality-card--fail .quality-card-icon { color: #EA580C; }
+
+.quality-card--pass .quality-card-title { color: #15803D; }
+.quality-card--fail .quality-card-title { color: #C2410C; }
+
+.quality-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.quality-check {
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.73rem;
+  font-weight: 600;
+}
+
+.quality-check--ok {
+  background: #DCFCE7;
+  color: #15803D;
+}
+
+.quality-check--fail {
+  background: #FEE2E2;
+  color: #B91C1C;
+}
+
+.quality-gaps {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #92400E;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.quality-gaps li { margin-bottom: 0.2rem; }
 
 .clarification-card {
   background: #FFFBEB;

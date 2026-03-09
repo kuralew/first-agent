@@ -6,7 +6,8 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { watch } from "chokidar";
 import type Anthropic from "@anthropic-ai/sdk";
-import { runAgent, runAgentStream } from "./agent.js";
+import { runAgent } from "./agent.js";
+import { runOrchestration } from "./orchestrator.js";
 import { PORT, MAX_DOC_CHARS, MAX_HISTORY } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -319,12 +320,13 @@ app.post("/chat/stream", async (req, res) => {
     const recentMemories = loadRecentMemories();
     const memoryContext = formatMemoriesForPrompt(recentMemories);
 
-    await runAgentStream(
+    await runOrchestration(
       messages,
-      (text) => send({ type: "chunk", text }),
-      (name, input, result) => send({ type: "tool", name, input, result }),
+      (agentId, text) => send({ type: "chunk", agentId, text }),
+      (agentId, name, input, result) => send({ type: "tool", agentId, name, input, result }),
       (question, reason, canProceed) => send({ type: "clarification", question, reason, canProceed }),
-      memoryContext || undefined
+      memoryContext || undefined,
+      (agentId, label) => send({ type: "agent_start", agentId, label })
     );
     send({ type: "done", history: messages });
   } catch (err) {

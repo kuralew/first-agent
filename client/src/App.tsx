@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, CaseListItem, SavedCase, DraftReview, ClarificationRequest, CaseMemory, ConversationTurn } from "./types.ts";
+import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, QualityResult, CaseListItem, SavedCase, DraftReview, ClarificationRequest, CaseMemory, ConversationTurn } from "./types.ts";
 import { extractPdfText } from "./adapters/pdfExtract.ts";
 import { generatePdfReport } from "./adapters/pdfReport.tsx";
 import type { ReportData } from "./adapters/pdfReport.tsx";
@@ -99,8 +99,8 @@ function AssistantText({
       >
         {text}
       </ReactMarkdown>
-      {streaming && isLast && !toolRunning && <span className="cursor" />}
-      {streaming && isLast && toolRunning && (
+      {streaming && isLast && !toolRunning && text && <span className="cursor" />}
+      {streaming && isLast && (toolRunning || !text) && (
         <span className="thinking-label">
           <svg className="thinking-icon" viewBox="0 0 20 20" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg">
             <circle cx="10" cy="10" r="8.2" stroke="currentColor" strokeWidth="1.3" strokeDasharray="3.5 2" />
@@ -108,7 +108,7 @@ function AssistantText({
             <circle cx="15.7" cy="13.1" r="1.6" fill="currentColor" />
             <circle cx="4.3" cy="13.1" r="1.6" fill="currentColor" />
           </svg>
-          {({
+          {toolRunning ? (({
             extract_key_facts:     "Extracting facts",
             draft_document:        "Drafting document",
             flag_risks:            "Flagging risks",
@@ -116,7 +116,7 @@ function AssistantText({
             save_legal_context:    "Saving legal context",
             assess_quality:        "Reviewing quality",
             request_clarification: "Requesting clarification",
-          } as Record<string, string>)[toolRunning] ?? "Working"}
+          } as Record<string, string>)[toolRunning] ?? "Working") : "Thinking"}
           <span className="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
         </span>
       )}
@@ -590,6 +590,37 @@ const ClarificationCard = memo(function ClarificationCard({
     </div>
   );
 });
+
+// ── Quality result card ───────────────────────────────────────────────────────
+
+function QualityCard({ result }: { result: QualityResult }) {
+  const checks: Array<{ label: string; ok: boolean }> = [
+    { label: "Facts & citations",  ok: result.facts_adequate },
+    { label: "Draft completeness", ok: result.draft_adequate },
+    { label: "Risk citations",     ok: result.risks_adequate },
+    { label: "Legal research",     ok: result.research_adequate },
+  ];
+  return (
+    <div className={`quality-card ${result.overall_ready ? "quality-card--pass" : "quality-card--fail"}`}>
+      <div className="quality-card-header">
+        <span className="quality-card-icon">{result.overall_ready ? "✓" : "✗"}</span>
+        <span className="quality-card-title">{result.overall_ready ? "Quality gate passed" : "Quality gaps found"}</span>
+      </div>
+      <div className="quality-checks">
+        {checks.map((c) => (
+          <span key={c.label} className={`quality-check ${c.ok ? "quality-check--ok" : "quality-check--fail"}`}>
+            {c.ok ? "✓" : "✗"} {c.label}
+          </span>
+        ))}
+      </div>
+      {result.gaps.length > 0 && (
+        <ul className="quality-gaps">
+          {result.gaps.map((g, i) => <li key={i}>{g}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 // ── Case sidebar ──────────────────────────────────────────────────────────────
 
@@ -1441,6 +1472,9 @@ export default function App() {
               <div className={`message-content message-content-${msg.role}`}>
                 {msg.role === "assistant" ? (
                   <>
+                    {msg.agentLabel && (
+                      <div className="agent-label">{msg.agentLabel}</div>
+                    )}
                     {msg.toolLogs && msg.toolLogs.length > 0 && (
                       <details className="tool-logs">
                         <summary>
@@ -1483,6 +1517,9 @@ export default function App() {
                     {msg.legalContext && (
                       <LegalContextCard context={msg.legalContext} />
                     )}
+                    {msg.qualityResult && (
+                      <QualityCard result={msg.qualityResult} />
+                    )}
                     {msg.clarification && (
                       <ClarificationCard
                         clarification={msg.clarification}
@@ -1494,8 +1531,8 @@ export default function App() {
                       citations={msg.citations ?? []}
                       onCitationClick={handleCitationClick}
                       streaming={streaming}
-                      toolRunning={toolRunning}
-                      isLast={i === displayMessages.length - 1}
+                      toolRunning={msg.toolRunning ?? null}
+                      isLast={i === displayMessages.length - 1 || !!msg.toolRunning}
                     />
                   </>
                 ) : (
