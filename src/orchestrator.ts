@@ -28,6 +28,15 @@ interface ResearcherResult {
   legalContext: Record<string, unknown> | null;
 }
 
+interface QualityAssessment {
+  facts_adequate: boolean;
+  draft_adequate: boolean;
+  risks_adequate: boolean;
+  research_adequate: boolean;
+  gaps: string[];
+  overall_ready: boolean;
+}
+
 // ── System prompts ────────────────────────────────────────────────────────────
 
 const CITATION_RULES = `
@@ -239,10 +248,19 @@ async function runDrafterAgent(
   originalMessages: Anthropic.MessageParam[],
   analystResult: AnalystResult,
   onChunk: (text: string) => void,
-  onToolLog: ToolLogCallback
+  onToolLog: ToolLogCallback,
+  qualityGaps?: string[]
 ): Promise<void> {
-  // Inject analyst context into system prompt — avoids consecutive user messages.
-  const system = `${DRAFTER_SYSTEM}\n\n${formatAnalystSummary(analystResult)}`;
+  let system = `${DRAFTER_SYSTEM}\n\n${formatAnalystSummary(analystResult)}`;
+
+  if (qualityGaps && qualityGaps.length > 0) {
+    system += [
+      "\n\n=== QUALITY FEEDBACK — previous draft failed ===",
+      "The previous draft did not pass quality review. Fix ALL of these gaps:",
+      qualityGaps.map((g) => `  - ${g}`).join("\n"),
+      "=== END QUALITY FEEDBACK ===",
+    ].join("\n");
+  }
 
   await runSubAgent({
     messages: originalMessages,
@@ -259,7 +277,7 @@ async function runQualityAgent(
   researcherResult: ResearcherResult,
   onChunk: (text: string) => void,
   onToolLog: ToolLogCallback
-): Promise<void> {
+): Promise<QualityAssessment | null> {
   const researchSummary = (researcherResult.legalContext as { summary?: string } | null)?.summary
     ?? "No research completed.";
   const findingsCount = ((researcherResult.legalContext as { findings?: unknown[] } | null)?.findings ?? []).length;
@@ -272,8 +290,9 @@ async function runQualityAgent(
     "=== END QUALITY REVIEW INPUT ===",
   ].join("\n");
 
-  // Inject full context into system prompt — avoids consecutive user messages.
   const system = `${QUALITY_SYSTEM}\n\n${qualityContext}`;
+
+  let assessment: QualityAssessment | null = null;
 
   await runSubAgent({
     messages: originalMessages,
@@ -281,7 +300,12 @@ async function runQualityAgent(
     tools: QUALITY_TOOLS,
     onChunk,
     onToolLog,
+    captureInputs: (name, input) => {
+      if (name === "assess_quality") assessment = input as unknown as QualityAssessment;
+    },
   });
+
+  return assessment;
 }
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
@@ -349,9 +373,11 @@ export async function runOrchestration(
     console.error("[orchestrator] Analyst failed:", err);
   }
 
-  // Phase 2: Drafter starts immediately after Analyst — does NOT wait for Researcher.
-  // No agent_start here — the bubble is created on first chunk/tool event to avoid an empty cursor.
-  console.log("[orchestrator] Phase 2: Drafter");
+  const MAX_RETRIES = 2; // up to 2 retries after initial draft = 3 total attempts
+
+  // Phase 2: Initial Drafter run.
+  // No agent_start — bubble created on first event to avoid an empty cursor during LLM latency.
+  console.log("[orchestrator] Phase 2: Drafter (attempt 1)");
   try {
     await runDrafterAgent(
       copy(),
@@ -364,23 +390,66 @@ export async function runOrchestration(
     console.error("[orchestrator] Drafter failed:", err);
   }
 
-  // Now collect Researcher result (should be done by this point).
+  // Collect Researcher now — it has had the full Analyst + Drafter time to run concurrently.
   const researcherResult = await researcherPromise;
   console.log("[orchestrator] Researcher collected — context:", !!researcherResult.legalContext);
 
-  // Phase 3: Quality check — show result to user.
-  console.log("[orchestrator] Phase 3: Quality");
-  onAgentStart?.("quality", "Quality");
-  try {
-    await runQualityAgent(
-      copy(),
-      analystResult,
-      researcherResult,
-      (text) => onChunk("quality", text),
-      toolLog("quality")
-    );
-  } catch (err) {
-    console.error("[orchestrator] Quality failed:", err);
+  // Phase 3: Quality → Drafter feedback loop.
+  let qualityGaps: string[] = [];
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const qualityAgentId = attempt === 0 ? "quality"         : `quality_r${attempt}`;
+    const qualityLabel   = attempt === 0 ? "Quality"         : `Quality · Check ${attempt + 1}`;
+
+    console.log(`[orchestrator] Quality check ${attempt + 1}`);
+    onAgentStart?.(qualityAgentId, qualityLabel);
+
+    let assessment: QualityAssessment | null = null;
+    try {
+      assessment = await runQualityAgent(
+        copy(),
+        analystResult,
+        researcherResult,
+        (text) => onChunk(qualityAgentId, text),
+        toolLog(qualityAgentId)
+      );
+      console.log(`[orchestrator] Quality check ${attempt + 1} — ready:`, assessment?.overall_ready);
+    } catch (err) {
+      console.error(`[orchestrator] Quality check ${attempt + 1} failed:`, err);
+      break;
+    }
+
+    // Pass or no assessment — done.
+    if (!assessment || assessment.overall_ready) break;
+
+    // Fail — collect gaps, retry Drafter if retries remain.
+    qualityGaps = assessment.gaps ?? [];
+    console.log(`[orchestrator] Quality gaps:`, qualityGaps);
+
+    if (attempt >= MAX_RETRIES) {
+      console.log("[orchestrator] Max retries reached — stopping.");
+      break;
+    }
+
+    const retryNum      = attempt + 1;
+    const retryAgentId  = `drafter_r${retryNum}`;
+    const retryLabel    = `Drafter · Retry ${retryNum}`;
+
+    console.log(`[orchestrator] Drafter retry ${retryNum}`);
+    onAgentStart?.(retryAgentId, retryLabel);
+    try {
+      await runDrafterAgent(
+        copy(),
+        analystResult,
+        (text) => onChunk(retryAgentId, text),
+        toolLog(retryAgentId),
+        qualityGaps
+      );
+      console.log(`[orchestrator] Drafter retry ${retryNum} done`);
+    } catch (err) {
+      console.error(`[orchestrator] Drafter retry ${retryNum} failed:`, err);
+      break;
+    }
   }
 
   console.log("[orchestrator] Done");
