@@ -2094,3 +2094,235 @@ body {
   color: #92400E;
   flex-shrink: 0;
 }
+
+/* ── Header actions (right side: export + settings) ─── */
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ── Settings gear button ────────────────────────────── */
+
+.settings-anchor {
+  position: relative;
+}
+
+.settings-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #6B7280;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.settings-btn:hover,
+.settings-btn--active {
+  background: #F0EDE8;
+  border-color: #D0CABD;
+  color: #1A1A1A;
+}
+
+/* ── Settings panel dropdown ─────────────────────────── */
+
+.settings-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 280px;
+  background: #fff;
+  border: 1px solid #E0DAD2;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.10);
+  padding: 0.75rem;
+  z-index: 100;
+}
+
+.settings-panel-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #888;
+  padding: 0 0.25rem 0.5rem;
+  border-bottom: 1px solid #EAE6E0;
+  margin-bottom: 0.5rem;
+}
+
+.settings-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 0.25rem;
+}
+
+.settings-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-item-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1A1A1A;
+}
+
+.settings-item-desc {
+  font-size: 0.75rem;
+  color: #6B7280;
+  margin-top: 1px;
+}
+
+/* ── Toggle switch ───────────────────────────────────── */
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #D1D5DB;
+  border-radius: 20px;
+  transition: background 0.2s;
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  top: 3px;
+  left: 3px;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: #1B3A6B;
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+}
+
+/* ── HITL reply card ─────────────────────────────────── */
+
+.hitl-reply-wrap {
+  padding: 0 1.5rem 0.75rem;
+}
+
+.hitl-reply-card {
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.hitl-reply-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.hitl-reply-icon {
+  color: #1B3A6B;
+  flex-shrink: 0;
+}
+
+.hitl-reply-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1B3A6B;
+}
+
+.hitl-reply-question {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1A1A1A;
+  line-height: 1.45;
+}
+
+.hitl-reply-reason {
+  font-size: 0.8rem;
+  color: #4B5563;
+  line-height: 1.4;
+}
+
+.hitl-reply-input {
+  width: 100%;
+  border: 1px solid #BFDBFE;
+  border-radius: 7px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.875rem;
+  font-family: inherit;
+  background: #fff;
+  resize: none;
+  outline: none;
+  color: #1A1A1A;
+  transition: border-color 0.15s;
+  line-height: 1.45;
+}
+.hitl-reply-input:focus {
+  border-color: #1B3A6B;
+}
+
+.hitl-reply-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.hitl-skip-btn {
+  background: none;
+  border: 1px solid #D0CABD;
+  border-radius: 6px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.82rem;
+  font-family: inherit;
+  color: #6B7280;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.hitl-skip-btn:hover { background: #F0EDE8; }
+
+.hitl-submit-btn {
+  background: #1B3A6B;
+  border: none;
+  border-radius: 6px;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.hitl-submit-btn:hover { background: #15305A; }
+.hitl-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }

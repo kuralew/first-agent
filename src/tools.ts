@@ -27,6 +27,14 @@ export const toolDefinitions: Anthropic.Tool[] = [
           type: "string",
           description: "One sentence explaining the routing decision",
         },
+        clarification_question: {
+          type: "string",
+          description: "Only when human-in-the-loop is enabled: ONE critical question to ask the user before analysis begins. Omit entirely if HITL is disabled or if there is no genuinely blocking ambiguity.",
+        },
+        clarification_reason: {
+          type: "string",
+          description: "Why this clarification is needed and how the answer will change the analysis",
+        },
       },
       required: ["document_type", "run_researcher", "rationale"],
     },
