@@ -1871,6 +1871,52 @@ body {
 
 /* ── Clarification card ───────────────────────────────────────────────────── */
 
+/* ── Routing decision card ──────────────────────────────────────────────────── */
+
+.routing-card {
+  background: #F8F9FC;
+  border: 1px solid rgba(27, 58, 107, 0.15);
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.routing-card-type {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #1B3A6B;
+}
+
+.routing-card-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.routing-pill {
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.routing-pill--always { background: #E8EDF5; color: #1B3A6B; }
+.routing-pill--on     { background: #DCFCE7; color: #15803D; }
+.routing-pill--off    { background: #F3F4F6; color: #9CA3AF; text-decoration: line-through; }
+
+.routing-card-focus {
+  font-size: 0.73rem;
+  color: #4B5563;
+  font-style: italic;
+}
+
+.routing-card-rationale {
+  font-size: 0.75rem;
+  color: #6B7280;
+}
+
 /* ── Quality result card ────────────────────────────────────────────────────── */
 
 .quality-card {

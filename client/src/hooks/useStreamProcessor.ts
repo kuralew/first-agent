@@ -1,9 +1,10 @@
 // Shared SSE stream processor — eliminates the duplicated streaming loop across all 4 send handlers.
-import type { DisplayMessage, ExtractedFacts, DocumentDraft, DocumentRisks, LegalContext, QualityResult, ConversationTurn } from "../types.ts";
+import type { DisplayMessage, ExtractedFacts, DocumentDraft, DocumentRisks, LegalContext, QualityResult, RoutingDecision, ConversationTurn } from "../types.ts";
 import { parseCitations, stripPlanningPhrases } from "../utils/citations.ts";
 
 // Static label map — used when creating fallback bubbles (no prior agent_start)
 const AGENT_LABELS: Record<string, string> = {
+  router:     "Router",
   analyst:    "Analyst",
   researcher: "Researcher",
   drafter:    "Drafter",
@@ -117,11 +118,12 @@ export function useStreamProcessor({
           updateMsgAt(agentId, (msg) => {
             const toolLogs = [...(msg.toolLogs ?? []), { name: data.name ?? "", input: data.input, result: data.result ?? "" }];
             const update: Partial<DisplayMessage> = { toolLogs, toolRunning: data.name };
-            if (data.name === "extract_key_facts" && data.input) update.extractedFacts = data.input as ExtractedFacts;
-            if (data.name === "draft_document"     && data.input) update.draft = data.input as DocumentDraft;
-            if (data.name === "flag_risks"          && data.input) update.risks = data.input as DocumentRisks;
-            if (data.name === "save_legal_context"  && data.input) update.legalContext = data.input as LegalContext;
-            if (data.name === "assess_quality"      && data.input) update.qualityResult = data.input as QualityResult;
+            if (data.name === "route_document"      && data.input) update.routingDecision = data.input as RoutingDecision;
+            if (data.name === "extract_key_facts"   && data.input) update.extractedFacts = data.input as ExtractedFacts;
+            if (data.name === "draft_document"      && data.input) update.draft = data.input as DocumentDraft;
+            if (data.name === "flag_risks"           && data.input) update.risks = data.input as DocumentRisks;
+            if (data.name === "save_legal_context"   && data.input) update.legalContext = data.input as LegalContext;
+            if (data.name === "assess_quality"       && data.input) update.qualityResult = data.input as QualityResult;
             return { ...msg, ...update };
           });
 

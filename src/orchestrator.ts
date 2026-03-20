@@ -6,6 +6,7 @@ import type { ToolLogCallback, ClarificationCallback } from "./agent.js";
 
 // ── Tool whitelists ───────────────────────────────────────────────────────────
 
+const ROUTER_TOOLS     = toolDefinitions.filter(t => t.name === "route_document");
 const ANALYST_TOOLS    = toolDefinitions.filter(t => ["extract_key_facts", "flag_risks"].includes(t.name));
 const RESEARCHER_TOOLS = toolDefinitions.filter(t => ["search_legal", "save_legal_context"].includes(t.name));
 const DRAFTER_TOOLS    = toolDefinitions.filter(t => ["draft_document"].includes(t.name));
@@ -28,6 +29,10 @@ interface ResearcherResult {
   legalContext: Record<string, unknown> | null;
 }
 
+interface DrafterResult {
+  draft: { draft_type: string; title: string; content: string } | null;
+}
+
 interface QualityAssessment {
   facts_adequate: boolean;
   draft_adequate: boolean;
@@ -35,6 +40,13 @@ interface QualityAssessment {
   research_adequate: boolean;
   gaps: string[];
   overall_ready: boolean;
+}
+
+interface RoutingDecision {
+  document_type: string;
+  run_researcher: boolean;
+  researcher_focus?: string;
+  rationale: string;
 }
 
 // ── System prompts ────────────────────────────────────────────────────────────
@@ -48,6 +60,20 @@ Multi-line passage — cite FIRST and LAST boundary lines only.
 Cross-document fact — cite both sources.
 Copy every tag exactly as it appears in the source.
 `.trim();
+
+const ROUTER_SYSTEM = `You are the MLex Router at McDermott Will & Schulte.
+
+Your only job: classify the document and decide the optimal analysis pipeline.
+
+Call route_document immediately with:
+- document_type: the specific legal document type (e.g. "FTC Complaint", "Employment Contract", "NDA", "Consent Order")
+- run_researcher: true ONLY when external legal research adds real value:
+  YES → regulatory complaints, employment disputes, IP/patent cases, novel legal issues, litigation
+  NO  → standard NDAs, simple vendor contracts, routine consent orders, straightforward agreements
+- researcher_focus: if run_researcher=true, the specific legal area to search (e.g. "FTC deceptive practices precedents 2020-2024")
+- rationale: one sentence explaining your decision
+
+Call route_document immediately. No narration, no preamble.`;
 
 const ANALYST_SYSTEM = `You are the MLex Analyst sub-agent at McDermott Will & Schulte.
 
@@ -225,15 +251,45 @@ async function runAnalystAgent(
   return result;
 }
 
-async function runResearcherAgent(
+async function runRouterAgent(
   messages: Anthropic.MessageParam[],
+  onChunk: (text: string) => void,
   onToolLog: ToolLogCallback
-): Promise<ResearcherResult> {
-  const result: ResearcherResult = { legalContext: null };
+): Promise<RoutingDecision> {
+  let decision: RoutingDecision | null = null;
 
   await runSubAgent({
     messages,
-    system: RESEARCHER_SYSTEM,
+    system: ROUTER_SYSTEM,
+    tools: ROUTER_TOOLS,
+    onChunk,
+    onToolLog,
+    captureInputs: (name, input) => {
+      if (name === "route_document") decision = input as unknown as RoutingDecision;
+    },
+  });
+
+  // Fallback if router fails — run full pipeline
+  return decision ?? {
+    document_type: "Unknown",
+    run_researcher: true,
+    rationale: "Router failed — running full pipeline as fallback",
+  };
+}
+
+async function runResearcherAgent(
+  messages: Anthropic.MessageParam[],
+  onToolLog: ToolLogCallback,
+  focusHint?: string
+): Promise<ResearcherResult> {
+  const result: ResearcherResult = { legalContext: null };
+  const system = focusHint
+    ? `${RESEARCHER_SYSTEM}\n\nFocus your search specifically on: ${focusHint}`
+    : RESEARCHER_SYSTEM;
+
+  await runSubAgent({
+    messages,
+    system,
     tools: RESEARCHER_TOOLS,
     onToolLog,
     captureInputs: (name, input) => {
@@ -250,7 +306,7 @@ async function runDrafterAgent(
   onChunk: (text: string) => void,
   onToolLog: ToolLogCallback,
   qualityGaps?: string[]
-): Promise<void> {
+): Promise<DrafterResult> {
   let system = `${DRAFTER_SYSTEM}\n\n${formatAnalystSummary(analystResult)}`;
 
   if (qualityGaps && qualityGaps.length > 0) {
@@ -262,19 +318,29 @@ async function runDrafterAgent(
     ].join("\n");
   }
 
+  const result: DrafterResult = { draft: null };
+
   await runSubAgent({
     messages: originalMessages,
     system,
     tools: DRAFTER_TOOLS,
     onChunk,
     onToolLog,
+    captureInputs: (name, input) => {
+      if (name === "draft_document") {
+        result.draft = input as { draft_type: string; title: string; content: string };
+      }
+    },
   });
+
+  return result;
 }
 
 async function runQualityAgent(
   originalMessages: Anthropic.MessageParam[],
   analystResult: AnalystResult,
   researcherResult: ResearcherResult,
+  drafterResult: DrafterResult,
   onChunk: (text: string) => void,
   onToolLog: ToolLogCallback
 ): Promise<QualityAssessment | null> {
@@ -282,11 +348,22 @@ async function runQualityAgent(
     ?? "No research completed.";
   const findingsCount = ((researcherResult.legalContext as { findings?: unknown[] } | null)?.findings ?? []).length;
 
+  const draftSection = drafterResult.draft
+    ? [
+        `\n=== DRAFT TO REVIEW ===`,
+        `Type: ${drafterResult.draft.draft_type}`,
+        `Title: ${drafterResult.draft.title}`,
+        `\n${drafterResult.draft.content}`,
+        `=== END DRAFT ===`,
+      ].join("\n")
+    : "\n=== DRAFT TO REVIEW ===\nNo draft was produced.\n=== END DRAFT ===";
+
   const qualityContext = [
     "=== QUALITY REVIEW INPUT ===",
     formatAnalystSummary(analystResult),
     `\nResearcher summary: ${researchSummary}`,
     `Findings captured: ${findingsCount}`,
+    draftSection,
     "=== END QUALITY REVIEW INPUT ===",
   ].join("\n");
 
@@ -348,14 +425,35 @@ export async function runOrchestration(
 
   const copy = () => JSON.parse(JSON.stringify(messages)) as Anthropic.MessageParam[];
 
-  // Kick off Researcher immediately in the background — it runs the whole time.
-  console.log("[orchestrator] Starting Researcher in background");
-  onAgentStart?.("researcher", "Researcher");
-  const researcherPromise = runResearcherAgent(copy(), toolLog("researcher"))
-    .catch((err) => {
-      console.error("[orchestrator] Researcher failed (non-fatal):", err);
-      return { legalContext: null } as ResearcherResult;
-    });
+  // Phase 0: Router — classify document and decide pipeline.
+  console.log("[orchestrator] Phase 0: Router");
+  onAgentStart?.("router", "Router");
+  let routing: RoutingDecision = { document_type: "Unknown", run_researcher: true, rationale: "Default" };
+  try {
+    routing = await runRouterAgent(
+      copy(),
+      (text) => onChunk("router", text),
+      toolLog("router")
+    );
+    console.log(`[orchestrator] Routing decision: ${routing.document_type} — researcher: ${routing.run_researcher}`);
+  } catch (err) {
+    console.error("[orchestrator] Router failed — using full pipeline:", err);
+  }
+
+  // Kick off Researcher in background only if routing says it adds value.
+  let researcherPromise: Promise<ResearcherResult>;
+  if (routing.run_researcher) {
+    console.log("[orchestrator] Starting Researcher in background");
+    onAgentStart?.("researcher", "Researcher");
+    researcherPromise = runResearcherAgent(copy(), toolLog("researcher"), routing.researcher_focus)
+      .catch((err) => {
+        console.error("[orchestrator] Researcher failed (non-fatal):", err);
+        return { legalContext: null } as ResearcherResult;
+      });
+  } else {
+    console.log("[orchestrator] Skipping Researcher (routing decision)");
+    researcherPromise = Promise.resolve({ legalContext: null });
+  }
 
   // Phase 1: Analyst streams to client.
   console.log("[orchestrator] Phase 1: Analyst");
@@ -378,14 +476,15 @@ export async function runOrchestration(
   // Phase 2: Initial Drafter run.
   // No agent_start — bubble created on first event to avoid an empty cursor during LLM latency.
   console.log("[orchestrator] Phase 2: Drafter (attempt 1)");
+  let drafterResult: DrafterResult = { draft: null };
   try {
-    await runDrafterAgent(
+    drafterResult = await runDrafterAgent(
       copy(),
       analystResult,
       (text) => onChunk("drafter", text),
       toolLog("drafter")
     );
-    console.log("[orchestrator] Drafter done");
+    console.log("[orchestrator] Drafter done — draft captured:", !!drafterResult.draft);
   } catch (err) {
     console.error("[orchestrator] Drafter failed:", err);
   }
@@ -396,10 +495,13 @@ export async function runOrchestration(
 
   // Phase 3: Quality → Drafter feedback loop.
   let qualityGaps: string[] = [];
+  let lastQualityAgentId = "quality";
+  let exhausted = false;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const qualityAgentId = attempt === 0 ? "quality"         : `quality_r${attempt}`;
     const qualityLabel   = attempt === 0 ? "Quality"         : `Quality · Check ${attempt + 1}`;
+    lastQualityAgentId = qualityAgentId;
 
     console.log(`[orchestrator] Quality check ${attempt + 1}`);
     onAgentStart?.(qualityAgentId, qualityLabel);
@@ -410,6 +512,7 @@ export async function runOrchestration(
         copy(),
         analystResult,
         researcherResult,
+        drafterResult,
         (text) => onChunk(qualityAgentId, text),
         toolLog(qualityAgentId)
       );
@@ -427,6 +530,7 @@ export async function runOrchestration(
     console.log(`[orchestrator] Quality gaps:`, qualityGaps);
 
     if (attempt >= MAX_RETRIES) {
+      exhausted = true;
       console.log("[orchestrator] Max retries reached — stopping.");
       break;
     }
@@ -438,18 +542,27 @@ export async function runOrchestration(
     console.log(`[orchestrator] Drafter retry ${retryNum}`);
     onAgentStart?.(retryAgentId, retryLabel);
     try {
-      await runDrafterAgent(
+      drafterResult = await runDrafterAgent(
         copy(),
         analystResult,
         (text) => onChunk(retryAgentId, text),
         toolLog(retryAgentId),
         qualityGaps
       );
-      console.log(`[orchestrator] Drafter retry ${retryNum} done`);
+      console.log(`[orchestrator] Drafter retry ${retryNum} done — draft captured:`, !!drafterResult.draft);
     } catch (err) {
       console.error(`[orchestrator] Drafter retry ${retryNum} failed:`, err);
       break;
     }
+  }
+
+  if (exhausted) {
+    const gapList = qualityGaps.map((g, i) => `\n- Gap ${i + 1}: ${g}`).join("");
+    onChunk(lastQualityAgentId,
+      `\n\n**Quality could not be resolved after ${MAX_RETRIES + 1} attempts.**` +
+      ` The following gaps remain:${gapList}\n\n` +
+      `Please use the **Request Revision** button to provide additional guidance.`
+    );
   }
 
   console.log("[orchestrator] Done");
