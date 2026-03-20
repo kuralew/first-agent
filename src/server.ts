@@ -283,7 +283,7 @@ app.post("/chat", async (req, res) => {
 });
 
 app.post("/chat/stream", async (req, res) => {
-  const { userMessage, history = [], docText, humanInTheLoop, clarificationAnswer } = req.body as {
+  const { userMessage, history = [], docText, humanInTheLoop, clarificationAnswer, existingRouting } = req.body as {
     userMessage: string;
     history: Anthropic.MessageParam[];
     // Pre-assembled, labeled, doc-ID-prefixed text for all uploaded documents.
@@ -291,6 +291,7 @@ app.post("/chat/stream", async (req, res) => {
     docText?: string;
     humanInTheLoop?: boolean;
     clarificationAnswer?: string;
+    existingRouting?: unknown;
   };
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -323,6 +324,7 @@ app.post("/chat/stream", async (req, res) => {
     const memoryContext = formatMemoriesForPrompt(recentMemories);
 
     let hitlPaused = false;
+    let hitlRouting: unknown = null;
 
     await runOrchestration(
       messages,
@@ -334,13 +336,15 @@ app.post("/chat/stream", async (req, res) => {
       {
         humanInTheLoop: humanInTheLoop ?? false,
         clarificationAnswer,
-        onHitlPause: (question, reason) => {
+        existingRouting: existingRouting as never,
+        onHitlPause: (question, reason, routing) => {
           hitlPaused = true;
+          hitlRouting = routing;
           send({ type: "hitl_pause", question, reason });
         },
       }
     );
-    send({ type: "done", history: messages, awaitingClarification: hitlPaused });
+    send({ type: "done", history: messages, awaitingClarification: hitlPaused, routingDecision: hitlRouting });
   } catch (err) {
     console.error(err);
     send({ type: "error", error: String(err) });

@@ -421,7 +421,8 @@ async function runQualityAgent(
 export interface OrchestrationOptions {
   humanInTheLoop?: boolean;
   clarificationAnswer?: string;
-  onHitlPause?: (question: string, reason: string) => void;
+  existingRouting?: RoutingDecision;
+  onHitlPause?: (question: string, reason: string, routing: RoutingDecision) => void;
 }
 
 export async function runOrchestration(
@@ -463,7 +464,7 @@ export async function runOrchestration(
 
   const copy = () => JSON.parse(JSON.stringify(messages)) as Anthropic.MessageParam[];
 
-  const { humanInTheLoop = false, clarificationAnswer, onHitlPause } = options ?? {};
+  const { humanInTheLoop = false, clarificationAnswer, existingRouting, onHitlPause } = options ?? {};
 
   // If a clarification answer was provided, inject it into the messages context.
   if (clarificationAnswer) {
@@ -479,26 +480,33 @@ export async function runOrchestration(
   }
 
   // Phase 0: Router — classify document and decide pipeline.
-  console.log("[orchestrator] Phase 0: Router");
-  onAgentStart?.("router", "Router");
-  let routing: RoutingDecision = { document_type: "Unknown", run_researcher: true, rationale: "Default" };
-  try {
-    routing = await runRouterAgent(
-      copy(),
-      (text) => onChunk("router", text),
-      toolLog("router"),
-      humanInTheLoop && !clarificationAnswer  // only ask if HITL on AND no answer yet
-    );
-    console.log(`[orchestrator] Routing decision: ${routing.document_type} — researcher: ${routing.run_researcher}`);
-  } catch (err) {
-    console.error("[orchestrator] Router failed — using full pipeline:", err);
-  }
+  // If a routing decision already exists (HITL follow-up), skip the Router entirely.
+  let routing: RoutingDecision;
+  if (existingRouting) {
+    console.log("[orchestrator] Phase 0: Router skipped — using existing routing decision");
+    routing = existingRouting;
+  } else {
+    console.log("[orchestrator] Phase 0: Router");
+    onAgentStart?.("router", "Router");
+    routing = { document_type: "Unknown", run_researcher: true, rationale: "Default" };
+    try {
+      routing = await runRouterAgent(
+        copy(),
+        (text) => onChunk("router", text),
+        toolLog("router"),
+        humanInTheLoop  // ask if HITL on (existingRouting is absent so this is the first run)
+      );
+      console.log(`[orchestrator] Routing decision: ${routing.document_type} — researcher: ${routing.run_researcher}`);
+    } catch (err) {
+      console.error("[orchestrator] Router failed — using full pipeline:", err);
+    }
 
-  // HITL pause — Router found a clarification question and no answer has been provided yet.
-  if (humanInTheLoop && !clarificationAnswer && routing.clarification_question) {
-    console.log("[orchestrator] HITL pause — emitting clarification question");
-    onHitlPause?.(routing.clarification_question, routing.clarification_reason ?? "");
-    return; // pipeline stops here; resumes on next request with clarificationAnswer
+    // HITL pause — Router found a clarification question.
+    if (humanInTheLoop && routing.clarification_question) {
+      console.log("[orchestrator] HITL pause — emitting clarification question");
+      onHitlPause?.(routing.clarification_question, routing.clarification_reason ?? "", routing);
+      return; // pipeline stops here; resumes on next request with clarificationAnswer + existingRouting
+    }
   }
 
   // Kick off Researcher in background only if routing says it adds value.

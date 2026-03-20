@@ -26,6 +26,7 @@ type SSEData = {
   reason?: string;
   canProceed?: boolean;
   awaitingClarification?: boolean;
+  routingDecision?: unknown;
 };
 
 interface UseStreamProcessorOptions {
@@ -35,6 +36,7 @@ interface UseStreamProcessorOptions {
   setStreaming: React.Dispatch<React.SetStateAction<boolean>>;
   setToolRunning: React.Dispatch<React.SetStateAction<string | null>>;
   onHitlPause?: (question: string, reason: string) => void;
+  onHitlRouting?: (routing: RoutingDecision) => void;
 }
 
 /**
@@ -50,6 +52,7 @@ export function useStreamProcessor({
   setStreaming,
   setToolRunning,
   onHitlPause,
+  onHitlRouting,
 }: UseStreamProcessorOptions) {
   async function processStream(res: Response): Promise<void> {
     const reader = res.body!.getReader();
@@ -141,6 +144,7 @@ export function useStreamProcessor({
 
         } else if (data.type === "done") {
           if (data.history) setHistory(data.history);
+          if (data.awaitingClarification && data.routingDecision) onHitlRouting?.(data.routingDecision as RoutingDecision);
         } else if (data.type === "error") {
           throw new Error(data.error);
         }

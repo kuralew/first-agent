@@ -742,6 +742,15 @@ export default function App() {
 
   const [intakeNotification, setIntakeNotification] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [collapsedAgents, setCollapsedAgents] = useState<Set<number>>(new Set());
+
+  function toggleAgentCollapse(idx: number) {
+    setCollapsedAgents((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      return next;
+    });
+  }
 
   // Settings
   const [humanInTheLoop, setHumanInTheLoop] = useState(() => localStorage.getItem("mlex_hitl") === "true");
@@ -754,6 +763,7 @@ export default function App() {
   const [hitlReason, setHitlReason] = useState("");
   const [hitlAnswer, setHitlAnswer] = useState("");
   const hitlContextRef = useRef<{ docText?: string; userMessage: string } | null>(null);
+  const hitlRoutingRef = useRef<RoutingDecision | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -789,6 +799,7 @@ export default function App() {
       setHitlQuestion(question);
       setHitlReason(reason);
     },
+    onHitlRouting: (routing) => { hitlRoutingRef.current = routing; },
   });
 
   useEffect(() => {
@@ -1407,6 +1418,7 @@ export default function App() {
           docText: ctx.docText,
           humanInTheLoop: false,
           clarificationAnswer: answer.trim() || undefined,
+          existingRouting: hitlRoutingRef.current ?? undefined,
         }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -1591,70 +1603,86 @@ export default function App() {
                 {msg.role === "assistant" ? (
                   <>
                     {msg.agentLabel && (
-                      <div className="agent-label">{msg.agentLabel}</div>
+                      <button
+                        className="agent-label-btn"
+                        onClick={() => toggleAgentCollapse(i)}
+                        aria-expanded={!collapsedAgents.has(i)}
+                      >
+                        <span className="agent-label">{msg.agentLabel}</span>
+                        <svg
+                          className={`agent-chevron${collapsedAgents.has(i) ? " agent-chevron--collapsed" : ""}`}
+                          viewBox="0 0 12 12" fill="none" width="11" height="11"
+                        >
+                          <path d="M2 4.5L6 8.5L10 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
                     )}
-                    {msg.toolLogs && msg.toolLogs.length > 0 && (
-                      <details className="tool-logs">
-                        <summary>
-                          <span className="tool-logs-icon">⚙</span>
-                          Used {msg.toolLogs.length} tool{msg.toolLogs.length !== 1 ? "s" : ""}
-                        </summary>
-                        <div className="tool-logs-body">
-                          {msg.toolLogs.map((log, j) => (
-                            <div key={j} className="tool-log">
-                              <div className="tool-log-header">
-                                <span className="tool-name">{log.name}</span>
-                              </div>
-                              <pre className="tool-input">{JSON.stringify(log.input, null, 2)}</pre>
-                              <pre className="tool-result">{log.result}</pre>
+                    {!collapsedAgents.has(i) && (
+                      <>
+                        {msg.toolLogs && msg.toolLogs.length > 0 && (
+                          <details className="tool-logs">
+                            <summary>
+                              <span className="tool-logs-icon">⚙</span>
+                              Used {msg.toolLogs.length} tool{msg.toolLogs.length !== 1 ? "s" : ""}
+                            </summary>
+                            <div className="tool-logs-body">
+                              {msg.toolLogs.map((log, j) => (
+                                <div key={j} className="tool-log">
+                                  <div className="tool-log-header">
+                                    <span className="tool-name">{log.name}</span>
+                                  </div>
+                                  <pre className="tool-input">{JSON.stringify(log.input, null, 2)}</pre>
+                                  <pre className="tool-result">{log.result}</pre>
+                                </div>
+                              ))}
                             </div>
-                          ))}
-                        </div>
-                      </details>
+                          </details>
+                        )}
+                        {msg.routingDecision && (
+                          <RoutingCard decision={msg.routingDecision} />
+                        )}
+                        {msg.extractedFacts && (
+                          <FactsCard
+                            facts={msg.extractedFacts}
+                            onCitationClick={handleCitationClick}
+                          />
+                        )}
+                        {msg.draft && (
+                          <DraftCard
+                            draft={msg.draft}
+                            review={msg.draftReview}
+                            onApprove={() => approveDraft(i)}
+                            onReject={(comment) => rejectDraft(i, comment)}
+                          />
+                        )}
+                        {msg.risks && (
+                          <RisksCard
+                            risks={msg.risks}
+                            onCitationClick={handleCitationClick}
+                          />
+                        )}
+                        {msg.legalContext && (
+                          <LegalContextCard context={msg.legalContext} />
+                        )}
+                        {msg.qualityResult && (
+                          <QualityCard result={msg.qualityResult} />
+                        )}
+                        {msg.clarification && (
+                          <ClarificationCard
+                            clarification={msg.clarification}
+                            onAnswer={(answer) => answerClarification(i, answer)}
+                          />
+                        )}
+                        <AssistantText
+                          text={msg.text}
+                          citations={msg.citations ?? []}
+                          onCitationClick={handleCitationClick}
+                          streaming={streaming}
+                          toolRunning={msg.toolRunning ?? null}
+                          isLast={i === displayMessages.length - 1 || !!msg.toolRunning}
+                        />
+                      </>
                     )}
-                    {msg.routingDecision && (
-                      <RoutingCard decision={msg.routingDecision} />
-                    )}
-                    {msg.extractedFacts && (
-                      <FactsCard
-                        facts={msg.extractedFacts}
-                        onCitationClick={handleCitationClick}
-                      />
-                    )}
-                    {msg.draft && (
-                      <DraftCard
-                        draft={msg.draft}
-                        review={msg.draftReview}
-                        onApprove={() => approveDraft(i)}
-                        onReject={(comment) => rejectDraft(i, comment)}
-                      />
-                    )}
-                    {msg.risks && (
-                      <RisksCard
-                        risks={msg.risks}
-                        onCitationClick={handleCitationClick}
-                      />
-                    )}
-                    {msg.legalContext && (
-                      <LegalContextCard context={msg.legalContext} />
-                    )}
-                    {msg.qualityResult && (
-                      <QualityCard result={msg.qualityResult} />
-                    )}
-                    {msg.clarification && (
-                      <ClarificationCard
-                        clarification={msg.clarification}
-                        onAnswer={(answer) => answerClarification(i, answer)}
-                      />
-                    )}
-                    <AssistantText
-                      text={msg.text}
-                      citations={msg.citations ?? []}
-                      onCitationClick={handleCitationClick}
-                      streaming={streaming}
-                      toolRunning={msg.toolRunning ?? null}
-                      isLast={i === displayMessages.length - 1 || !!msg.toolRunning}
-                    />
                   </>
                 ) : (
                   <div className="user-message-stack">
