@@ -106,6 +106,13 @@ export interface LegalContext {
   findings: LegalFinding[];
 }
 
+export interface RoutingDecision {
+  document_type: string;
+  run_researcher: boolean;
+  researcher_focus?: string;
+  rationale: string;
+}
+
 export interface QualityResult {
   facts_adequate: boolean;
   draft_adequate: boolean;
@@ -164,7 +171,8 @@ export interface DisplayMessage {
   legalContext?: LegalContext;
   clarification?: ClarificationRequest;
   isIntake?: boolean;   // true when triggered by the file watcher, not the user
-  agentLabel?: string;    // e.g. "Analyst", "Researcher", "Drafter" — for multi-agent bubbles
+  agentLabel?: string;        // e.g. "Analyst", "Researcher", "Drafter" — for multi-agent bubbles
+  routingDecision?: RoutingDecision; // captured from route_document tool
   toolRunning?: string;   // currently-running tool name for this bubble's spinner
   qualityResult?: QualityResult; // captured from assess_quality tool
 }

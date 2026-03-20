@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, QualityResult, CaseListItem, SavedCase, DraftReview, ClarificationRequest, CaseMemory, ConversationTurn } from "./types.ts";
+import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, QualityResult, RoutingDecision, CaseListItem, SavedCase, DraftReview, ClarificationRequest, CaseMemory, ConversationTurn } from "./types.ts";
 import { extractPdfText } from "./adapters/pdfExtract.ts";
 import { generatePdfReport } from "./adapters/pdfReport.tsx";
 import type { ReportData } from "./adapters/pdfReport.tsx";
@@ -590,6 +590,29 @@ const ClarificationCard = memo(function ClarificationCard({
     </div>
   );
 });
+
+// ── Routing decision card ─────────────────────────────────────────────────────
+
+function RoutingCard({ decision }: { decision: RoutingDecision }) {
+  return (
+    <div className="routing-card">
+      <div className="routing-card-type">{decision.document_type}</div>
+      <div className="routing-card-pills">
+        <span className="routing-pill routing-pill--always">Analyst</span>
+        {decision.run_researcher
+          ? <span className="routing-pill routing-pill--on">Researcher</span>
+          : <span className="routing-pill routing-pill--off">Researcher skipped</span>
+        }
+        <span className="routing-pill routing-pill--always">Drafter</span>
+        <span className="routing-pill routing-pill--always">Quality</span>
+      </div>
+      {decision.researcher_focus && (
+        <div className="routing-card-focus">Research focus: {decision.researcher_focus}</div>
+      )}
+      <div className="routing-card-rationale">{decision.rationale}</div>
+    </div>
+  );
+}
 
 // ── Quality result card ───────────────────────────────────────────────────────
 
@@ -1493,6 +1516,9 @@ export default function App() {
                           ))}
                         </div>
                       </details>
+                    )}
+                    {msg.routingDecision && (
+                      <RoutingCard decision={msg.routingDecision} />
                     )}
                     {msg.extractedFacts && (
                       <FactsCard
