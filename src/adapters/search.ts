@@ -1,4 +1,5 @@
-// Adapter for legal web search. Swap this file to change the search provider.
+// Adapter for legal web search — powered by Tavily (built for AI agents).
+// API calls are limited: max 2 queries per search_legal call, 3 results each.
 
 export interface SearchHit {
   title: string;
@@ -12,41 +13,49 @@ export interface SearchResult {
 }
 
 export async function performLegalSearch(queries: string[]): Promise<string> {
-  const apiKey = process.env.BRAVE_API_KEY;
+  const apiKey = process.env.TAVILY_API_KEY;
   if (!apiKey) {
-    return JSON.stringify({ error: "BRAVE_API_KEY not configured. Add it to your .env file." });
+    return JSON.stringify({ error: "TAVILY_API_KEY not configured. Add it to your .env file." });
   }
 
+  // Cap at 2 queries to conserve free-tier calls
+  const capped = queries.slice(0, 2);
   const results: SearchResult[] = [];
 
-  for (const query of queries) {
+  for (const query of capped) {
     try {
-      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5&result_filter=web`;
-      const resp = await fetch(url, {
-        headers: {
-          "Accept": "application/json",
-          "Accept-Encoding": "gzip",
-          "X-Subscription-Token": apiKey,
-        },
+      const resp = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: apiKey,
+          query,
+          search_depth: "basic",
+          max_results: 3,
+          include_answer: false,
+        }),
       });
 
       if (!resp.ok) {
+        console.warn(`[search] Tavily error ${resp.status} for query: ${query}`);
         results.push({ query, hits: [] });
         continue;
       }
 
       const data = await resp.json() as {
-        web?: { results?: Array<{ title: string; url: string; description?: string }> };
+        results?: Array<{ title: string; url: string; content?: string }>;
       };
 
-      const hits = (data.web?.results ?? []).slice(0, 5).map((r) => ({
+      const hits = (data.results ?? []).map((r) => ({
         title: r.title,
         url: r.url,
-        description: r.description ?? "",
+        description: r.content ?? "",
       }));
 
       results.push({ query, hits });
-    } catch {
+      console.log(`  [search] "${query}" → ${hits.length} results`);
+    } catch (err) {
+      console.warn(`  [search] Failed for query "${query}":`, err);
       results.push({ query, hits: [] });
     }
   }

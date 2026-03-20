@@ -161,7 +161,7 @@ export const toolDefinitions: Anthropic.Tool[] = [
     name: "search_legal",
     description:
       "Call this to search for relevant legal precedents, statutes, and case law related to the risks and claims identified. " +
-      "Derive 2–4 targeted search queries from the document's specific legal issues — use precise legal terminology. " +
+      "Derive 1–2 highly targeted search queries from the document's most critical legal issues — use precise legal terminology. " +
       "The results are supplemental external context only — they never replace or modify the document-grounded analysis.",
     input_schema: {
       type: "object" as const,
@@ -171,7 +171,7 @@ export const toolDefinitions: Anthropic.Tool[] = [
           description: "2–4 targeted legal search queries derived from the document's specific issues",
           items: { type: "string" },
           minItems: 1,
-          maxItems: 4,
+          maxItems: 2,
         },
         context: {
           type: "string",
