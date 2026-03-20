@@ -123,6 +123,12 @@ const QUALITY_SYSTEM = `You are the MLex Quality sub-agent at McDermott Will & S
 You will receive the complete analysis from the Analyst and Drafter.
 Your sole job: call assess_quality with honest evaluations.
 
+CRITICAL — ROUTING DECISIONS:
+The Router agent decided which sub-agents to run. You MUST respect those decisions:
+- If an agent was marked SKIPPED in the routing section, set its corresponding adequate field to true.
+  Never flag a skipped agent as a gap — it was a deliberate pipeline decision, not a failure.
+- Only flag gaps for agents that actually ran and produced inadequate output.
+
 If overall_ready is false, state the gaps found.
 If overall_ready is true, respond: "Quality gate passed."
 
@@ -341,12 +347,18 @@ async function runQualityAgent(
   analystResult: AnalystResult,
   researcherResult: ResearcherResult,
   drafterResult: DrafterResult,
+  routing: RoutingDecision,
   onChunk: (text: string) => void,
   onToolLog: ToolLogCallback
 ): Promise<QualityAssessment | null> {
-  const researchSummary = (researcherResult.legalContext as { summary?: string } | null)?.summary
-    ?? "No research completed.";
-  const findingsCount = ((researcherResult.legalContext as { findings?: unknown[] } | null)?.findings ?? []).length;
+  const researchSection = routing.run_researcher
+    ? (() => {
+        const summary = (researcherResult.legalContext as { summary?: string } | null)?.summary
+          ?? "No research completed.";
+        const findingsCount = ((researcherResult.legalContext as { findings?: unknown[] } | null)?.findings ?? []).length;
+        return `\nResearcher summary: ${summary}\nFindings captured: ${findingsCount}`;
+      })()
+    : `\nResearcher: SKIPPED — Router determined research does not add value for this document type (${routing.document_type}). Set research_adequate = true.`;
 
   const draftSection = drafterResult.draft
     ? [
@@ -358,11 +370,20 @@ async function runQualityAgent(
       ].join("\n")
     : "\n=== DRAFT TO REVIEW ===\nNo draft was produced.\n=== END DRAFT ===";
 
+  const routingSection = [
+    "\n=== ROUTING DECISION (AUTHORITATIVE — respect this) ===",
+    `Document type: ${routing.document_type}`,
+    `Researcher: ${routing.run_researcher ? "RAN" : "SKIPPED (set research_adequate = true)"}`,
+    routing.researcher_focus ? `Researcher focus: ${routing.researcher_focus}` : "",
+    `Rationale: ${routing.rationale}`,
+    "=== END ROUTING DECISION ===",
+  ].filter(Boolean).join("\n");
+
   const qualityContext = [
     "=== QUALITY REVIEW INPUT ===",
+    routingSection,
     formatAnalystSummary(analystResult),
-    `\nResearcher summary: ${researchSummary}`,
-    `Findings captured: ${findingsCount}`,
+    researchSection,
     draftSection,
     "=== END QUALITY REVIEW INPUT ===",
   ].join("\n");
@@ -513,6 +534,7 @@ export async function runOrchestration(
         analystResult,
         researcherResult,
         drafterResult,
+        routing,
         (text) => onChunk(qualityAgentId, text),
         toolLog(qualityAgentId)
       );
