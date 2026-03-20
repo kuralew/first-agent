@@ -67,7 +67,7 @@ Call tools immediately and silently. Never narrate ("I'll now call…", "Let me�
 
 const RESEARCHER_SYSTEM = `You are the MLex Researcher sub-agent at McDermott Will & Schulte.
 
-Your sole job: call search_legal with 2–4 targeted queries derived from the document's specific legal issues, then call save_legal_context to synthesize findings.
+Your sole job: call search_legal with 1–2 highly targeted queries on the document's most critical legal issues, then call save_legal_context to synthesize findings.
 
 Research is strictly supplemental context — do NOT allege new document facts.
 Do NOT use [d·p·l] citation tags for research findings.
