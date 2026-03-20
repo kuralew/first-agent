@@ -733,6 +733,21 @@ body {
 
 /* ── Agent label badge ──────────────────────────────────────────────────────── */
 
+.agent-label-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-bottom: 0.1rem;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.agent-label-btn:hover .agent-label {
+  background: rgba(27, 58, 107, 0.14);
+}
+
 .agent-label {
   display: inline-flex;
   align-items: center;
@@ -746,8 +761,17 @@ body {
   border: 1px solid rgba(27, 58, 107, 0.18);
   border-radius: 4px;
   padding: 0.15rem 0.45rem;
-  margin-bottom: 0.1rem;
-  align-self: flex-start;
+  transition: background 0.15s;
+}
+
+.agent-chevron {
+  color: #1B3A6B;
+  opacity: 0.6;
+  transition: transform 0.18s ease;
+  flex-shrink: 0;
+}
+.agent-chevron--collapsed {
+  transform: rotate(-90deg);
 }
 
 .tool-logs {
