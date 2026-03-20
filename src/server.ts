@@ -283,12 +283,14 @@ app.post("/chat", async (req, res) => {
 });
 
 app.post("/chat/stream", async (req, res) => {
-  const { userMessage, history = [], docText } = req.body as {
+  const { userMessage, history = [], docText, humanInTheLoop, clarificationAnswer } = req.body as {
     userMessage: string;
     history: Anthropic.MessageParam[];
     // Pre-assembled, labeled, doc-ID-prefixed text for all uploaded documents.
     // Format: "=== Document 1: name.pdf ===\n[d1·p1·l0·bbox:...]..."
     docText?: string;
+    humanInTheLoop?: boolean;
+    clarificationAnswer?: string;
   };
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -320,15 +322,25 @@ app.post("/chat/stream", async (req, res) => {
     const recentMemories = loadRecentMemories();
     const memoryContext = formatMemoriesForPrompt(recentMemories);
 
+    let hitlPaused = false;
+
     await runOrchestration(
       messages,
       (agentId, text) => send({ type: "chunk", agentId, text }),
       (agentId, name, input, result) => send({ type: "tool", agentId, name, input, result }),
       (question, reason, canProceed) => send({ type: "clarification", question, reason, canProceed }),
       memoryContext || undefined,
-      (agentId, label) => send({ type: "agent_start", agentId, label })
+      (agentId, label) => send({ type: "agent_start", agentId, label }),
+      {
+        humanInTheLoop: humanInTheLoop ?? false,
+        clarificationAnswer,
+        onHitlPause: (question, reason) => {
+          hitlPaused = true;
+          send({ type: "hitl_pause", question, reason });
+        },
+      }
     );
-    send({ type: "done", history: messages });
+    send({ type: "done", history: messages, awaitingClarification: hitlPaused });
   } catch (err) {
     console.error(err);
     send({ type: "error", error: String(err) });

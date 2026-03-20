@@ -25,6 +25,7 @@ type SSEData = {
   question?: string;
   reason?: string;
   canProceed?: boolean;
+  awaitingClarification?: boolean;
 };
 
 interface UseStreamProcessorOptions {
@@ -33,6 +34,7 @@ interface UseStreamProcessorOptions {
   setLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setStreaming: React.Dispatch<React.SetStateAction<boolean>>;
   setToolRunning: React.Dispatch<React.SetStateAction<string | null>>;
+  onHitlPause?: (question: string, reason: string) => void;
 }
 
 /**
@@ -47,6 +49,7 @@ export function useStreamProcessor({
   setLoading,
   setStreaming,
   setToolRunning,
+  onHitlPause,
 }: UseStreamProcessorOptions) {
   async function processStream(res: Response): Promise<void> {
     const reader = res.body!.getReader();
@@ -132,6 +135,9 @@ export function useStreamProcessor({
           const clarification = { question: data.question ?? "", reason: data.reason ?? "", canProceed: data.canProceed ?? true };
           ensureBubble(agentId);
           updateMsgAt(agentId, (msg) => ({ ...msg, clarification }));
+
+        } else if (data.type === "hitl_pause") {
+          onHitlPause?.(data.question ?? "", data.reason ?? "");
 
         } else if (data.type === "done") {
           if (data.history) setHistory(data.history);

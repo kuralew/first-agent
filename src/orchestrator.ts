@@ -47,6 +47,8 @@ interface RoutingDecision {
   run_researcher: boolean;
   researcher_focus?: string;
   rationale: string;
+  clarification_question?: string;
+  clarification_reason?: string;
 }
 
 // ── System prompts ────────────────────────────────────────────────────────────
@@ -61,7 +63,13 @@ Cross-document fact — cite both sources.
 Copy every tag exactly as it appears in the source.
 `.trim();
 
-const ROUTER_SYSTEM = `You are the MLex Router at McDermott Will & Schulte.
+function buildRouterSystem(humanInTheLoop: boolean): string {
+  const hitlSection = humanInTheLoop
+    ? `\n- clarification_question: (HITL mode is ON) ALWAYS include one useful question for the user. Pick the single most valuable question for this document type — e.g. the user's primary concern, specific risks to focus on, governing jurisdiction if unclear, intended use of the analysis, or the counterparty relationship. Make it specific to this document, not generic.
+- clarification_reason: one sentence explaining how the answer will improve the analysis\n`
+    : "";
+
+  return `You are the MLex Router at McDermott Will & Schulte.
 
 Your only job: classify the document and decide the optimal analysis pipeline.
 
@@ -71,9 +79,10 @@ Call route_document immediately with:
   YES → regulatory complaints, employment disputes, IP/patent cases, novel legal issues, litigation
   NO  → standard NDAs, simple vendor contracts, routine consent orders, straightforward agreements
 - researcher_focus: if run_researcher=true, the specific legal area to search (e.g. "FTC deceptive practices precedents 2020-2024")
-- rationale: one sentence explaining your decision
+- rationale: one sentence explaining your decision${hitlSection}
 
 Call route_document immediately. No narration, no preamble.`;
+}
 
 const ANALYST_SYSTEM = `You are the MLex Analyst sub-agent at McDermott Will & Schulte.
 
@@ -260,13 +269,14 @@ async function runAnalystAgent(
 async function runRouterAgent(
   messages: Anthropic.MessageParam[],
   onChunk: (text: string) => void,
-  onToolLog: ToolLogCallback
+  onToolLog: ToolLogCallback,
+  humanInTheLoop = false
 ): Promise<RoutingDecision> {
   let decision: RoutingDecision | null = null;
 
   await runSubAgent({
     messages,
-    system: ROUTER_SYSTEM,
+    system: buildRouterSystem(humanInTheLoop),
     tools: ROUTER_TOOLS,
     onChunk,
     onToolLog,
@@ -408,13 +418,20 @@ async function runQualityAgent(
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
 
+export interface OrchestrationOptions {
+  humanInTheLoop?: boolean;
+  clarificationAnswer?: string;
+  onHitlPause?: (question: string, reason: string) => void;
+}
+
 export async function runOrchestration(
   messages: Anthropic.MessageParam[],
   onChunk: AgentChunkCallback,
   onToolLog?: AgentToolCallback,
   onClarification?: ClarificationCallback,
   memoryContext?: string,
-  onAgentStart?: AgentStartCallback
+  onAgentStart?: AgentStartCallback,
+  options?: OrchestrationOptions
 ): Promise<void> {
   // Detect whether this is a document analysis request.
   const lastMsg = messages[messages.length - 1];
@@ -446,6 +463,21 @@ export async function runOrchestration(
 
   const copy = () => JSON.parse(JSON.stringify(messages)) as Anthropic.MessageParam[];
 
+  const { humanInTheLoop = false, clarificationAnswer, onHitlPause } = options ?? {};
+
+  // If a clarification answer was provided, inject it into the messages context.
+  if (clarificationAnswer) {
+    const lastMsg = messages[messages.length - 1];
+    const existingText = typeof lastMsg.content === "string"
+      ? lastMsg.content
+      : (lastMsg.content as Array<{ type: string; text?: string }>)
+          .filter(b => b.type === "text").map(b => b.text ?? "").join("");
+    messages[messages.length - 1] = {
+      role: "user",
+      content: `[Clarification provided by user: ${clarificationAnswer}]\n\n${existingText}`,
+    };
+  }
+
   // Phase 0: Router — classify document and decide pipeline.
   console.log("[orchestrator] Phase 0: Router");
   onAgentStart?.("router", "Router");
@@ -454,11 +486,19 @@ export async function runOrchestration(
     routing = await runRouterAgent(
       copy(),
       (text) => onChunk("router", text),
-      toolLog("router")
+      toolLog("router"),
+      humanInTheLoop && !clarificationAnswer  // only ask if HITL on AND no answer yet
     );
     console.log(`[orchestrator] Routing decision: ${routing.document_type} — researcher: ${routing.run_researcher}`);
   } catch (err) {
     console.error("[orchestrator] Router failed — using full pipeline:", err);
+  }
+
+  // HITL pause — Router found a clarification question and no answer has been provided yet.
+  if (humanInTheLoop && !clarificationAnswer && routing.clarification_question) {
+    console.log("[orchestrator] HITL pause — emitting clarification question");
+    onHitlPause?.(routing.clarification_question, routing.clarification_reason ?? "");
+    return; // pipeline stops here; resumes on next request with clarificationAnswer
   }
 
   // Kick off Researcher in background only if routing says it adds value.

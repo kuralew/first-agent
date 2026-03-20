@@ -111,6 +111,8 @@ export interface RoutingDecision {
   run_researcher: boolean;
   researcher_focus?: string;
   rationale: string;
+  clarification_question?: string;
+  clarification_reason?: string;
 }
 
 export interface QualityResult {

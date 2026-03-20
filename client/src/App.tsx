@@ -109,6 +109,7 @@ function AssistantText({
             <circle cx="4.3" cy="13.1" r="1.6" fill="currentColor" />
           </svg>
           {toolRunning ? (({
+            route_document:        "Classifying document",
             extract_key_facts:     "Extracting facts",
             draft_document:        "Drafting document",
             flag_risks:            "Flagging risks",
@@ -742,6 +743,18 @@ export default function App() {
   const [intakeNotification, setIntakeNotification] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
+  // Settings
+  const [humanInTheLoop, setHumanInTheLoop] = useState(() => localStorage.getItem("mlex_hitl") === "true");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => { localStorage.setItem("mlex_hitl", String(humanInTheLoop)); }, [humanInTheLoop]);
+
+  // HITL pause state — pipeline stopped, waiting for user clarification answer
+  const [hitlPaused, setHitlPaused] = useState(false);
+  const [hitlQuestion, setHitlQuestion] = useState("");
+  const [hitlReason, setHitlReason] = useState("");
+  const [hitlAnswer, setHitlAnswer] = useState("");
+  const hitlContextRef = useRef<{ docText?: string; userMessage: string } | null>(null);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -771,6 +784,11 @@ export default function App() {
     setLoading,
     setStreaming,
     setToolRunning,
+    onHitlPause: (question, reason) => {
+      setHitlPaused(true);
+      setHitlQuestion(question);
+      setHitlReason(reason);
+    },
   });
 
   useEffect(() => {
@@ -1148,13 +1166,17 @@ export default function App() {
         { role: "user", text: `Analyze: ${filename}`, docs: [newDoc], isIntake: true },
       ]);
 
+      const docText = `=== Document ${docId}: ${filename} ===\n${prefixedText.trim()}\n\n`;
+      const userMessage = `Please analyze this document: ${filename}`;
+      hitlContextRef.current = { docText, userMessage };
       const res = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userMessage: `Please analyze this document: ${filename}`,
+          userMessage,
           history: historyRef.current,
-          docText: `=== Document ${docId}: ${filename} ===\n${prefixedText.trim()}\n\n`,
+          docText,
+          humanInTheLoop,
         }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -1196,13 +1218,17 @@ export default function App() {
         ...prev,
         { role: "user", text: `Analyze: ${file.name}`, docs: [newDoc], isIntake: true },
       ]);
+      const docText = `=== Document ${docId}: ${file.name} ===\n${prefixedText.trim()}\n\n`;
+      const userMessage = `Please analyze this document: ${file.name}`;
+      hitlContextRef.current = { docText, userMessage };
       const res = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userMessage: `Please analyze this document: ${file.name}`,
+          userMessage,
           history: historyRef.current,
-          docText: `=== Document ${docId}: ${file.name} ===\n${prefixedText.trim()}\n\n`,
+          docText,
+          humanInTheLoop,
         }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -1261,6 +1287,7 @@ export default function App() {
         },
       ]);
 
+      if (combinedDocText) hitlContextRef.current = { docText: combinedDocText, userMessage: text };
       const res = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1268,6 +1295,7 @@ export default function App() {
           userMessage: text,
           history,
           docText: combinedDocText || undefined,
+          humanInTheLoop: combinedDocText ? humanInTheLoop : false,
         }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -1346,6 +1374,40 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userMessage: answer, history }),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      await processStream(res);
+    } catch (err) {
+      setDisplayMessages((prev) => [...prev, { role: "assistant", text: `Error: ${String(err)}` }]);
+    } finally {
+      setLoading(false);
+      setStreaming(false);
+      setToolRunning(null);
+    }
+  }
+
+  async function sendHitlAnswer(answer: string) {
+    const ctx = hitlContextRef.current;
+    if (!ctx) return;
+    setHitlPaused(false);
+    setHitlQuestion("");
+    setHitlReason("");
+    setHitlAnswer("");
+    if (answer.trim()) {
+      setDisplayMessages((prev) => [...prev, { role: "user", text: answer }]);
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userMessage: ctx.userMessage,
+          history,
+          docText: ctx.docText,
+          humanInTheLoop: false,
+          clarificationAnswer: answer.trim() || undefined,
+        }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       await processStream(res);
@@ -1455,7 +1517,8 @@ export default function App() {
             <span className="header-title">MLex</span>
             <span className="header-model">McDermott Will &amp; Schulte</span>
           </div>
-          {reportData && (
+          <div className="header-actions">
+            {reportData && (
             <button
               className="export-report-btn"
               onClick={exportReport}
@@ -1464,7 +1527,39 @@ export default function App() {
             >
               {exporting ? "Generating…" : "Export Report"}
             </button>
-          )}
+            )}
+            <div className="settings-anchor">
+              <button
+                className={`settings-btn${settingsOpen ? " settings-btn--active" : ""}`}
+                onClick={() => setSettingsOpen((o) => !o)}
+                title="Settings"
+              >
+                <svg viewBox="0 0 24 24" fill="none" width="17" height="17" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              {settingsOpen && (
+                <div className="settings-panel">
+                  <div className="settings-panel-title">Settings</div>
+                  <div className="settings-item">
+                    <div className="settings-item-info">
+                      <div className="settings-item-label">Human-in-the-loop</div>
+                      <div className="settings-item-desc">MLex asks one clarifying question before analysis begins</div>
+                    </div>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={humanInTheLoop}
+                        onChange={(e) => setHumanInTheLoop(e.target.checked)}
+                      />
+                      <span className="toggle-slider" />
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </header>
 
         {intakeNotification && (
@@ -1618,6 +1713,35 @@ export default function App() {
 
           <div ref={bottomRef} />
         </div>
+
+        {hitlPaused && (
+          <div className="hitl-reply-wrap">
+            <div className="hitl-reply-card">
+              <div className="hitl-reply-header">
+                <svg className="hitl-reply-icon" viewBox="0 0 20 20" fill="none" width="16" height="16">
+                  <circle cx="10" cy="10" r="8.5" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M10 6v4.5M10 13.5v.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                </svg>
+                <span className="hitl-reply-title">Clarification needed before analysis</span>
+              </div>
+              <div className="hitl-reply-question">{hitlQuestion}</div>
+              {hitlReason && <div className="hitl-reply-reason">{hitlReason}</div>}
+              <textarea
+                className="hitl-reply-input"
+                value={hitlAnswer}
+                onChange={(e) => setHitlAnswer(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendHitlAnswer(hitlAnswer); }}}
+                placeholder="Type your answer..."
+                rows={2}
+                autoFocus
+              />
+              <div className="hitl-reply-actions">
+                <button className="hitl-skip-btn" onClick={() => sendHitlAnswer("")}>Skip</button>
+                <button className="hitl-submit-btn" onClick={() => sendHitlAnswer(hitlAnswer)} disabled={loading}>Submit</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="input-wrap">
           {pendingDocs.length > 0 && (
