@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { DisplayMessage, Citation, DocInfo, CaseListItem, SavedCase, CaseMemory, ConversationTurn } from "./types.ts";
+import type { DisplayMessage, Citation, DocInfo, RoutingDecision, CaseListItem, SavedCase, CaseMemory, ConversationTurn } from "./types.ts";
 import { extractPdfText } from "./adapters/pdfExtract.ts";
 import { generatePdfReport } from "./adapters/pdfReport.tsx";
 import type { ReportData } from "./adapters/pdfReport.tsx";
@@ -10,6 +10,7 @@ import { useStreamProcessor } from "./hooks/useStreamProcessor.ts";
 import { CaseSidebar } from "./components/sidebar/CaseSidebar.tsx";
 import { AppHeader } from "./components/layout/AppHeader.tsx";
 import { IntakeNotification } from "./components/layout/IntakeNotification.tsx";
+import { HitlReplyCard } from "./components/layout/HitlReplyCard.tsx";
 import { PreviewPane } from "./components/layout/PreviewPane.tsx";
 import { MessageList } from "./components/chat/MessageList.tsx";
 import { ChatInput } from "./components/input/ChatInput.tsx";
@@ -38,6 +39,20 @@ export default function App() {
   const [intakeNotification, setIntakeNotification] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [collapsedAgents, setCollapsedAgents] = useState<Set<number>>(new Set());
+
+  // Settings
+  const [humanInTheLoop, setHumanInTheLoop] = useState(() => localStorage.getItem("mlex_hitl") === "true");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => { localStorage.setItem("mlex_hitl", String(humanInTheLoop)); }, [humanInTheLoop]);
+
+  // HITL pause state — pipeline stopped, waiting for user clarification answer
+  const [hitlPaused, setHitlPaused] = useState(false);
+  const [hitlQuestion, setHitlQuestion] = useState("");
+  const [hitlReason, setHitlReason] = useState("");
+  const [hitlAnswer, setHitlAnswer] = useState("");
+  const hitlContextRef = useRef<{ docText?: string; userMessage: string } | null>(null);
+  const hitlRoutingRef = useRef<RoutingDecision | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -68,7 +83,21 @@ export default function App() {
     setLoading,
     setStreaming,
     setToolRunning,
+    onHitlPause: (question, reason) => {
+      setHitlPaused(true);
+      setHitlQuestion(question);
+      setHitlReason(reason);
+    },
+    onHitlRouting: (routing) => { hitlRoutingRef.current = routing; },
   });
+
+  function toggleAgentCollapse(idx: number) {
+    setCollapsedAgents((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      return next;
+    });
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -82,8 +111,6 @@ export default function App() {
   }, [input]);
 
   useEffect(() => {
-    // In dev, bypass Vite proxy (which buffers SSE) and connect directly.
-    // Server CORS allows all localhost ports. In prod, same origin so /events works.
     const eventsUrl = import.meta.env.DEV ? "http://localhost:3001/events" : "/events";
     const es = new EventSource(eventsUrl);
     es.onopen = () => console.log("[sse] Connected to", eventsUrl);
@@ -110,12 +137,8 @@ export default function App() {
     }
   }, [streaming]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When the preview pane first opens (previewPdf changes), wait for pdfjs to
-  // initialise, scroll to the pending citation's page, then wait for the
-  // textLayer to render before setting activeCitation.
   useEffect(() => {
     if (!previewPdf || !pendingCitationRef.current) return;
-
     const pending = pendingCitationRef.current;
     let cancelled = false;
     let initAttempts = 0;
@@ -165,10 +188,8 @@ export default function App() {
     return () => { cancelled = true; };
   }, [previewPdf]);
 
-  // Scroll to cited line whenever activeCitation changes.
   useEffect(() => {
     if (!activeCitation || !previewPdf) return;
-
     let cancelled = false;
     let attempts = 0;
 
@@ -189,7 +210,6 @@ export default function App() {
         if (scrollToRef.current) {
           try { scrollToRef.current(citationToHighlight(activeCitation, sessionDocs)); } catch (_) {}
         }
-
         const page = activeCitation.page;
         const targetPage = previewPaneRef.current?.querySelector(`[data-page-number="${page}"]`);
         const textLayer = targetPage?.querySelector(".textLayer") as HTMLElement | null;
@@ -251,7 +271,6 @@ export default function App() {
   function handleCitationClick(citation: Citation) {
     const doc = sessionDocs.find((d) => d.id === citation.docId);
     if (!doc) return;
-
     if (!previewPdf || previewPdf.url !== doc.url) {
       pendingCitationRef.current = citation;
       setActiveCitation(null);
@@ -321,7 +340,6 @@ export default function App() {
   async function saveMemory(msgs: DisplayMessage[], feedbackToAdd?: string) {
     const id = activeCaseIdRef.current;
     if (!id) return;
-
     let documentType = "";
     let parties: CaseMemory["parties"] = [];
     let keyRisks: string[] = [];
@@ -345,7 +363,6 @@ export default function App() {
     }
 
     if (!documentType) return;
-
     const feedbackPatterns = feedbackToAdd
       ? [...new Set([...existingFeedback, feedbackToAdd])]
       : existingFeedback;
@@ -447,14 +464,13 @@ export default function App() {
         { role: "user", text: `Analyze: ${filename}`, docs: [newDoc], isIntake: true },
       ]);
 
+      const docText = `=== Document ${docId}: ${filename} ===\n${prefixedText.trim()}\n\n`;
+      const userMessage = `Please analyze this document: ${filename}`;
+      hitlContextRef.current = { docText, userMessage };
       const res = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userMessage: `Please analyze this document: ${filename}`,
-          history: historyRef.current,
-          docText: `=== Document ${docId}: ${filename} ===\n${prefixedText.trim()}\n\n`,
-        }),
+        body: JSON.stringify({ userMessage, history: historyRef.current, docText, humanInTheLoop }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       await processStream(res);
@@ -493,14 +509,13 @@ export default function App() {
         ...prev,
         { role: "user", text: `Analyze: ${file.name}`, docs: [newDoc], isIntake: true },
       ]);
+      const docText = `=== Document ${docId}: ${file.name} ===\n${prefixedText.trim()}\n\n`;
+      const userMessage = `Please analyze this document: ${file.name}`;
+      hitlContextRef.current = { docText, userMessage };
       const res = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userMessage: `Please analyze this document: ${file.name}`,
-          history: historyRef.current,
-          docText: `=== Document ${docId}: ${file.name} ===\n${prefixedText.trim()}\n\n`,
-        }),
+        body: JSON.stringify({ userMessage, history: historyRef.current, docText, humanInTheLoop }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       await processStream(res);
@@ -558,6 +573,7 @@ export default function App() {
         },
       ]);
 
+      if (combinedDocText) hitlContextRef.current = { docText: combinedDocText, userMessage: text };
       const res = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -565,6 +581,7 @@ export default function App() {
           userMessage: text,
           history,
           docText: combinedDocText || undefined,
+          humanInTheLoop: combinedDocText ? humanInTheLoop : false,
         }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -574,6 +591,41 @@ export default function App() {
         ...prev,
         { role: "assistant", text: `Error: ${String(err)}` },
       ]);
+    } finally {
+      setLoading(false);
+      setStreaming(false);
+      setToolRunning(null);
+    }
+  }
+
+  async function sendHitlAnswer(answer: string) {
+    const ctx = hitlContextRef.current;
+    if (!ctx) return;
+    setHitlPaused(false);
+    setHitlQuestion("");
+    setHitlReason("");
+    setHitlAnswer("");
+    if (answer.trim()) {
+      setDisplayMessages((prev) => [...prev, { role: "user", text: answer }]);
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userMessage: ctx.userMessage,
+          history,
+          docText: ctx.docText,
+          humanInTheLoop: false,
+          clarificationAnswer: answer.trim() || undefined,
+          existingRouting: hitlRoutingRef.current ?? undefined,
+        }),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      await processStream(res);
+    } catch (err) {
+      setDisplayMessages((prev) => [...prev, { role: "assistant", text: `Error: ${String(err)}` }]);
     } finally {
       setLoading(false);
       setStreaming(false);
@@ -608,7 +660,6 @@ export default function App() {
     setLoading(true);
     try {
       setDisplayMessages((prev) => [...prev, { role: "user", text: feedbackMsg }]);
-
       const res = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -638,7 +689,6 @@ export default function App() {
     setLoading(true);
     try {
       setDisplayMessages((prev) => [...prev, { role: "user", text: answer }]);
-
       const res = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -733,6 +783,10 @@ export default function App() {
           reportData={reportData}
           exporting={exporting}
           onExportReport={exportReport}
+          humanInTheLoop={humanInTheLoop}
+          onHumanInTheLoopChange={setHumanInTheLoop}
+          settingsOpen={settingsOpen}
+          onToggleSettings={() => setSettingsOpen((o) => !o)}
         />
 
         {intakeNotification && (
@@ -747,12 +801,26 @@ export default function App() {
           loading={loading}
           streaming={streaming}
           bottomRef={bottomRef}
+          collapsedAgents={collapsedAgents}
+          onToggleCollapse={toggleAgentCollapse}
           onCitationClick={handleCitationClick}
           onApproveDraft={approveDraft}
           onRejectDraft={rejectDraft}
           onAnswerClarification={answerClarification}
           onViewDoc={handleViewDoc}
         />
+
+        {hitlPaused && (
+          <HitlReplyCard
+            question={hitlQuestion}
+            reason={hitlReason}
+            answer={hitlAnswer}
+            loading={loading}
+            onAnswerChange={setHitlAnswer}
+            onSubmit={() => sendHitlAnswer(hitlAnswer)}
+            onSkip={() => sendHitlAnswer("")}
+          />
+        )}
 
         <ChatInput
           input={input}

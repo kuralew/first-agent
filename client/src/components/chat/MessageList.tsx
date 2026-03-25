@@ -10,6 +10,8 @@ export function MessageList({
   loading,
   streaming,
   bottomRef,
+  collapsedAgents,
+  onToggleCollapse,
   onCitationClick,
   onApproveDraft,
   onRejectDraft,
@@ -20,6 +22,8 @@ export function MessageList({
   loading: boolean;
   streaming: boolean;
   bottomRef: React.RefObject<HTMLDivElement>;
+  collapsedAgents: Set<number>;
+  onToggleCollapse: (idx: number) => void;
   onCitationClick: (c: Citation) => void;
   onApproveDraft: (msgIndex: number) => void;
   onRejectDraft: (msgIndex: number, comment: string) => void;
@@ -42,6 +46,8 @@ export function MessageList({
                 msgIndex={i}
                 isLast={i === displayMessages.length - 1 || !!msg.toolRunning}
                 streaming={streaming}
+                collapsed={collapsedAgents.has(i)}
+                onToggleCollapse={onToggleCollapse}
                 onCitationClick={onCitationClick}
                 onApproveDraft={onApproveDraft}
                 onRejectDraft={onRejectDraft}

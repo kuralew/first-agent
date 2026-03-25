@@ -6,12 +6,20 @@ export function AppHeader({
   reportData,
   exporting,
   onExportReport,
+  humanInTheLoop,
+  onHumanInTheLoopChange,
+  settingsOpen,
+  onToggleSettings,
 }: {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
   reportData: ReportData | null;
   exporting: boolean;
   onExportReport: () => void;
+  humanInTheLoop: boolean;
+  onHumanInTheLoopChange: (value: boolean) => void;
+  settingsOpen: boolean;
+  onToggleSettings: () => void;
 }) {
   return (
     <header className="header">
@@ -36,16 +44,49 @@ export function AppHeader({
         <span className="header-title">MLex</span>
         <span className="header-model">McDermott Will &amp; Schulte</span>
       </div>
-      {reportData && (
-        <button
-          className="export-report-btn"
-          onClick={onExportReport}
-          disabled={exporting}
-          title="Export full analysis as PDF"
-        >
-          {exporting ? "Generating…" : "Export Report"}
-        </button>
-      )}
+      <div className="header-actions">
+        {reportData && (
+          <button
+            className="export-report-btn"
+            onClick={onExportReport}
+            disabled={exporting}
+            title="Export full analysis as PDF"
+          >
+            {exporting ? "Generating…" : "Export Report"}
+          </button>
+        )}
+        <div className="settings-anchor">
+          <button
+            className={`settings-btn${settingsOpen ? " settings-btn--active" : ""}`}
+            onClick={onToggleSettings}
+            title="Settings"
+          >
+            <svg viewBox="0 0 24 24" fill="none" width="17" height="17" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+          {settingsOpen && (
+            <div className="settings-panel">
+              <div className="settings-panel-title">Settings</div>
+              <div className="settings-item">
+                <div className="settings-item-info">
+                  <div className="settings-item-label">Human-in-the-loop</div>
+                  <div className="settings-item-desc">MLex asks one clarifying question before analysis begins</div>
+                </div>
+                <label className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={humanInTheLoop}
+                    onChange={(e) => onHumanInTheLoopChange(e.target.checked)}
+                  />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </header>
   );
 }
