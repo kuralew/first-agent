@@ -2,3 +2,11 @@ node_modules/
 dist/
 .env
 client/.vite/
+
+# Runtime data
+cases/
+memories/
+inbox/
+
+# Local Claude Code settings
+.claude/settings.local.json
