@@ -10,3 +10,7 @@ inbox/
 
 # Local Claude Code settings
 .claude/settings.local.json
+
+# Generated reports
+*.report.pdf
+mlex-*.pdf

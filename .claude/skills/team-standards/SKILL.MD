@@ -9,6 +9,9 @@ version: "0.1"
 These standards apply to all frontend code in this project and take precedence 
 over general conventions where they conflict.
 
+## Testing
+- Use Vitest as the test runner. Full testing stack and fix instructions are defined in @../remediation/remediation-logic.md
+
 ## Colors
 - Primary font color must be #000042 — do not use black (#000000), near-black, 
   or any other dark color for body text. For primary button, use color: #000042 and hover #00E2C1 
