@@ -1,9 +1,10 @@
 // Shared SSE stream processor — eliminates the duplicated streaming loop across all 4 send handlers.
-import type { DisplayMessage, ExtractedFacts, DocumentDraft, DocumentRisks, LegalContext, QualityResult, ConversationTurn } from "../types.ts";
+import type { DisplayMessage, ExtractedFacts, DocumentDraft, DocumentRisks, LegalContext, QualityResult, RoutingDecision, ConversationTurn } from "../types.ts";
 import { parseCitations, stripPlanningPhrases } from "../utils/citations.ts";
 
 // Static label map — used when creating fallback bubbles (no prior agent_start)
 const AGENT_LABELS: Record<string, string> = {
+  router:     "Router",
   analyst:    "Analyst",
   researcher: "Researcher",
   drafter:    "Drafter",
@@ -24,6 +25,8 @@ type SSEData = {
   question?: string;
   reason?: string;
   canProceed?: boolean;
+  awaitingClarification?: boolean;
+  routingDecision?: unknown;
 };
 
 interface UseStreamProcessorOptions {
@@ -32,6 +35,8 @@ interface UseStreamProcessorOptions {
   setLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setStreaming: React.Dispatch<React.SetStateAction<boolean>>;
   setToolRunning: React.Dispatch<React.SetStateAction<string | null>>;
+  onHitlPause?: (question: string, reason: string) => void;
+  onHitlRouting?: (routing: RoutingDecision) => void;
 }
 
 /**
@@ -46,6 +51,8 @@ export function useStreamProcessor({
   setLoading,
   setStreaming,
   setToolRunning,
+  onHitlPause,
+  onHitlRouting,
 }: UseStreamProcessorOptions) {
   async function processStream(res: Response): Promise<void> {
     const reader = res.body!.getReader();
@@ -117,11 +124,12 @@ export function useStreamProcessor({
           updateMsgAt(agentId, (msg) => {
             const toolLogs = [...(msg.toolLogs ?? []), { name: data.name ?? "", input: data.input, result: data.result ?? "" }];
             const update: Partial<DisplayMessage> = { toolLogs, toolRunning: data.name };
-            if (data.name === "extract_key_facts" && data.input) update.extractedFacts = data.input as ExtractedFacts;
-            if (data.name === "draft_document"     && data.input) update.draft = data.input as DocumentDraft;
-            if (data.name === "flag_risks"          && data.input) update.risks = data.input as DocumentRisks;
-            if (data.name === "save_legal_context"  && data.input) update.legalContext = data.input as LegalContext;
-            if (data.name === "assess_quality"      && data.input) update.qualityResult = data.input as QualityResult;
+            if (data.name === "route_document"      && data.input) update.routingDecision = data.input as RoutingDecision;
+            if (data.name === "extract_key_facts"   && data.input) update.extractedFacts = data.input as ExtractedFacts;
+            if (data.name === "draft_document"      && data.input) update.draft = data.input as DocumentDraft;
+            if (data.name === "flag_risks"           && data.input) update.risks = data.input as DocumentRisks;
+            if (data.name === "save_legal_context"   && data.input) update.legalContext = data.input as LegalContext;
+            if (data.name === "assess_quality"       && data.input) update.qualityResult = data.input as QualityResult;
             return { ...msg, ...update };
           });
 
@@ -131,8 +139,12 @@ export function useStreamProcessor({
           ensureBubble(agentId);
           updateMsgAt(agentId, (msg) => ({ ...msg, clarification }));
 
+        } else if (data.type === "hitl_pause") {
+          onHitlPause?.(data.question ?? "", data.reason ?? "");
+
         } else if (data.type === "done") {
           if (data.history) setHistory(data.history);
+          if (data.awaitingClarification && data.routingDecision) onHitlRouting?.(data.routingDecision as RoutingDecision);
         } else if (data.type === "error") {
           throw new Error(data.error);
         }

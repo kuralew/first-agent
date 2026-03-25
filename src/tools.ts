@@ -3,6 +3,43 @@ import { performLegalSearch } from "./adapters/search.js";
 
 export const toolDefinitions: Anthropic.Tool[] = [
   {
+    name: "route_document",
+    description:
+      "Call this immediately upon receiving a document to classify it and decide the optimal analysis pipeline. " +
+      "Run researcher only when external legal research adds real value: YES for regulatory complaints, employment disputes, " +
+      "IP/patent cases, novel legal issues. NO for standard NDAs, simple contracts, routine consent orders.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        document_type: {
+          type: "string",
+          description: "Specific type of document, e.g. 'FTC Complaint', 'Employment Contract', 'NDA', 'Consent Order', 'Deposition'",
+        },
+        run_researcher: {
+          type: "boolean",
+          description: "Whether external legal research would add meaningful value for this document type",
+        },
+        researcher_focus: {
+          type: "string",
+          description: "If run_researcher=true: the specific legal area to search, e.g. 'FTC deceptive practices precedents'",
+        },
+        rationale: {
+          type: "string",
+          description: "One sentence explaining the routing decision",
+        },
+        clarification_question: {
+          type: "string",
+          description: "Only when human-in-the-loop is enabled: ONE critical question to ask the user before analysis begins. Omit entirely if HITL is disabled or if there is no genuinely blocking ambiguity.",
+        },
+        clarification_reason: {
+          type: "string",
+          description: "Why this clarification is needed and how the answer will change the analysis",
+        },
+      },
+      required: ["document_type", "run_researcher", "rationale"],
+    },
+  },
+  {
     name: "extract_key_facts",
     description:
       "Call this to save the structured key facts you have identified from a document. " +
@@ -161,7 +198,7 @@ export const toolDefinitions: Anthropic.Tool[] = [
     name: "search_legal",
     description:
       "Call this to search for relevant legal precedents, statutes, and case law related to the risks and claims identified. " +
-      "Derive 2–4 targeted search queries from the document's specific legal issues — use precise legal terminology. " +
+      "Derive 1–2 highly targeted search queries from the document's most critical legal issues — use precise legal terminology. " +
       "The results are supplemental external context only — they never replace or modify the document-grounded analysis.",
     input_schema: {
       type: "object" as const,
@@ -171,7 +208,7 @@ export const toolDefinitions: Anthropic.Tool[] = [
           description: "2–4 targeted legal search queries derived from the document's specific issues",
           items: { type: "string" },
           minItems: 1,
-          maxItems: 4,
+          maxItems: 2,
         },
         context: {
           type: "string",
@@ -300,6 +337,9 @@ export async function executeTool(
   input: Record<string, unknown>
 ): Promise<string> {
   switch (name) {
+    case "route_document":
+      return `Routing recorded: ${input.document_type} — researcher: ${input.run_researcher}${input.researcher_focus ? ` (focus: ${input.researcher_focus})` : ""}.`;
+
     case "extract_key_facts":
       return `Extracted facts recorded: ${(input.facts as unknown[])?.length ?? 0} facts, ${(input.parties as unknown[])?.length ?? 0} parties.`;
 

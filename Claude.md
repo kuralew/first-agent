@@ -1,7 +1,7 @@
 # MLex — Claude Code Instructions
 
 ## Project
-MLex is an AI legal assistant for McDermott Will & Schulte. It analyzes legal documents (PDFs), extracts facts, drafts responses, flags risks, researches precedents, and learns from attorney feedback across cases.
+MLex is an AI legal assistant for McDermott Will & Schulte. It analyzes legal documents (PDFs), extracts facts, drafts responses, flags risks, researches legal precedents, and learns from attorney feedback across cases.
 
 ## Stack
 - **Backend**: Node.js + Express + TypeScript (`src/`)
@@ -10,6 +10,7 @@ MLex is an AI legal assistant for McDermott Will & Schulte. It analyzes legal do
 - **PDF extraction**: pdfjs-dist (client-side, with bbox coordinates)
 - **PDF viewer**: react-pdf-highlighter
 - **PDF generation**: @react-pdf/renderer (lazy-loaded)
+- **Legal search**: Tavily API (`TAVILY_API_KEY`)
 
 ## Commands
 ```bash
@@ -22,16 +23,26 @@ npm run build:client  # Build frontend to client/dist/
 ```
 first-agent/
 ├── src/
-│   ├── agent.ts      # System prompt + agentic loop (runAgentStream, runAgent)
-│   ├── tools.ts      # Tool definitions + executeTool (7 tools)
-│   ├── server.ts     # Express API + memory injection + SSE streaming
-│   └── index.ts      # CLI entry point
+│   ├── agent.ts          # System prompt + agentic loop (runAgentStream, runAgent)
+│   ├── orchestrator.ts   # Multi-agent pipeline (Router → Analyst + Researcher → Drafter → Quality)
+│   ├── tools.ts          # Tool definitions + executeTool (8 tools)
+│   ├── server.ts         # Express API + memory injection + SSE streaming
+│   ├── config.ts         # Constants (PORT, MODEL, MAX_DOC_CHARS, etc.)
+│   ├── adapters/
+│   │   └── search.ts     # Tavily legal search adapter
+│   └── index.ts          # CLI entry point
 ├── client/src/
-│   ├── App.tsx       # Main React app (all UI, SSE handlers, state)
-│   ├── App.css       # All styles
-│   ├── types.ts      # Shared TypeScript interfaces
-│   ├── ReportPdf.tsx # PDF report generator (lazy-loaded)
-│   └── pdfExtract.ts # Client-side PDF text + bbox extraction
+│   ├── App.tsx           # Main React app (all UI, SSE handlers, state)
+│   ├── App.css           # All styles
+│   ├── types.ts          # Shared TypeScript interfaces
+│   ├── hooks/
+│   │   └── useStreamProcessor.ts  # Shared SSE stream handler
+│   ├── utils/
+│   │   └── citations.ts  # Citation parsing utilities
+│   └── adapters/
+│       ├── pdfExtract.ts # Client-side PDF text + bbox extraction
+│       ├── pdfViewer.tsx # react-pdf-highlighter wrapper
+│       └── pdfReport.tsx # PDF report generator (lazy-loaded)
 ├── inbox/            # Drop PDFs here for auto-intake (watched by chokidar)
 ├── cases/            # Saved case JSON files + uploaded PDFs
 └── memories/         # Per-case memory JSON files (cross-case learning)
@@ -39,11 +50,31 @@ first-agent/
 
 ## Architecture
 
+### Multi-Agent Pipeline (`src/orchestrator.ts`)
+Document analysis runs through a dedicated orchestrator, not the single agent:
+
+```
+Router ──► Analyst ──────────────────────────────► Drafter ──► Quality
+               │                                        ▲           │
+               └──► Researcher (if needed) ─────────────┘    retry loop
+                    [runs in parallel with Analyst]           (up to 3x)
+```
+
+| Agent | Purpose |
+|---|---|
+| **Router** | Classifies document type, decides whether Researcher adds value, optionally asks one HITL clarification question |
+| **Analyst** | Extracts facts + flags risks (runs `extract_key_facts` then `flag_risks`) |
+| **Researcher** | Runs Tavily legal search, saves findings via `save_legal_context`. Skipped for simple NDAs/contracts |
+| **Drafter** | Produces a complete professional draft document based on Analyst + Researcher output |
+| **Quality** | Reviews all output, scores each dimension, retries Drafter if gaps found (max 3 attempts) |
+
+Non-document requests (follow-up chat) bypass the orchestrator and go to `runAgentStream` directly.
+
 ### Backend API (`src/server.ts`)
 | Endpoint | Purpose |
 |---|---|
 | `GET /events` | SSE stream for intake notifications |
-| `POST /chat/stream` | Main chat endpoint — streams chunks, tool events, clarifications |
+| `POST /chat/stream` | Main chat endpoint — streams agent events (chunk, tool, agent_start, hitl_pause, done) |
 | `POST /chat` | Non-streaming fallback |
 | `GET/POST/DELETE /cases/:id` | Case CRUD |
 | `POST /cases/:id/docs` | Upload PDF for a case |
@@ -51,33 +82,49 @@ first-agent/
 | `POST /memories` | Upsert case memory |
 | `GET /inbox/*` | Serve inbox PDFs |
 
-### Agent Loop (`src/agent.ts`)
-- `runAgentStream` — streaming agentic loop with tool execution
-- Injects `memoryContext` (past case patterns) into system prompt on every call
-- Emits SSE events: `chunk`, `tool`, `clarification`, `done`, `error`
-- 2-second delay between tool iterations (rate limit mitigation)
-- History trimmed to last 12 messages server-side
+Request body for `/chat/stream`:
+```ts
+{
+  userMessage: string;
+  history: MessageParam[];
+  docText?: string;           // pre-extracted PDF text with bbox tags
+  humanInTheLoop?: boolean;   // enables HITL clarification before analysis
+  clarificationAnswer?: string; // user's answer to HITL question
+  existingRouting?: RoutingDecision; // skip Router re-run on HITL follow-up
+}
+```
+
+### SSE Event Types
+| Event | Payload |
+|---|---|
+| `agent_start` | `{ agentId, label }` — new agent bubble |
+| `chunk` | `{ agentId, text }` — streaming text |
+| `tool` | `{ agentId, name, input, result }` — tool call |
+| `clarification` | `{ agentId, question, reason, canProceed }` — mid-pipeline clarification |
+| `hitl_pause` | `{ question, reason }` — HITL pause before pipeline |
+| `done` | `{ history, awaitingClarification?, routingDecision? }` |
+| `error` | `{ error }` |
 
 ### Tools (`src/tools.ts`)
-| Tool | Purpose |
-|---|---|
-| `extract_key_facts` | Parties, facts, dates, amounts from document |
-| `draft_document` | Full professional draft (response, memo, plan) |
-| `flag_risks` | Legal risks with severity + citations |
-| `search_legal` | Brave Search for precedents/statutes |
-| `save_legal_context` | Persist synthesized research findings |
-| `assess_quality` | Self-review quality gate — re-runs deficient tools |
-| `request_clarification` | Pause agent and ask user for missing info |
-
-**Rule**: When a document is present, always run the full chain:
-`extract_key_facts → draft_document → flag_risks → search_legal → save_legal_context → assess_quality`
+| Tool | Agent | Purpose |
+|---|---|---|
+| `route_document` | Router | Classify doc + decide pipeline. Optional `clarification_question` when HITL on |
+| `extract_key_facts` | Analyst | Parties, facts, dates, amounts with citations |
+| `flag_risks` | Analyst | Legal risks with severity + citations |
+| `search_legal` | Researcher | Tavily search (max 2 queries, 3 results each) |
+| `save_legal_context` | Researcher | Persist synthesized research findings |
+| `draft_document` | Drafter | Full professional draft document |
+| `assess_quality` | Quality | Self-review gate — scores all dimensions |
+| `request_clarification` | Any | Pause and ask user for missing info |
 
 ### Frontend (`client/src/App.tsx`)
-- 4 SSE streaming handlers: `send()`, `intakeAnalyze()`, `rejectDraft()`, `answerClarification()`
-- Tool events create the assistant message immediately (before chunks arrive)
-- Cards rendered per message: `FactsCard`, `DraftCard`, `RisksCard`, `LegalContextCard`, `ClarificationCard`
+- SSE stream handled by `useStreamProcessor` hook (shared across all send handlers)
+- Per-agent bubbles: each agent gets a labeled, collapsible bubble
+- Agent labels are clickable toggles (chevron) to collapse/expand content
+- Settings panel (gear icon in header): **Human-in-the-loop** toggle (localStorage)
+- HITL reply card appears above input when pipeline is paused
+- Cards rendered per message: `RoutingCard`, `FactsCard`, `DraftCard`, `RisksCard`, `LegalContextCard`, `QualityCard`, `ClarificationCard`
 - Auto-saves case + memory when streaming ends
-- Feedback patterns saved to memory on draft rejection
 
 ### Memory System
 - One JSON file per case in `memories/`
@@ -101,9 +148,9 @@ first-agent/
 ## Environment Variables (`.env`)
 ```
 ANTHROPIC_API_KEY=...
-BRAVE_API_KEY=...     # For search_legal tool
+TAVILY_API_KEY=...    # For search_legal tool (free tier — use sparingly, max 2 queries/request)
 ```
 
 ## Rate Limits
 Org limit: 30,000 input tokens/minute on claude-sonnet-4-6.
-Mitigations in place: doc text capped at 16k chars, history trimmed to 12 messages, 2s delay between tool iterations.
+Mitigations: doc text capped at `MAX_DOC_CHARS`, history trimmed to `MAX_HISTORY` messages, 2s delay between tool iterations.
