@@ -107,3 +107,27 @@ BRAVE_API_KEY=...     # For search_legal tool
 ## Rate Limits
 Org limit: 30,000 input tokens/minute on claude-sonnet-4-6.
 Mitigations in place: doc text capped at 16k chars, history trimmed to 12 messages, 2s delay between tool iterations.
+
+## Code Quality & Security System
+
+This repo uses a three-layer security and code quality system.
+
+### Layer 1 — Claude Code (pre-commit)
+Before every commit, two reviews must run:
+- /code-review — checks code quality and team standards
+- /security-review — checks for security vulnerabilities (OWASP)
+
+Both are enforced automatically via hooks. If either finds issues, use 
+/remediation to fix them.
+
+### Standards
+- Team coding standards are in .claude/skills/team-standards/SKILL.md
+- Fix instructions are in .claude/skills/remediation/remediation-logic.md
+
+### Layer 2 — Git Hooks
+GitLeaks runs on every commit to detect secrets. If it blocks a commit,
+use /remediation with the finding to fix it.
+
+### Layer 3 — CI/CD Pipeline
+SonarQube, Dependabot, and GitLeaks run on every PR. Findings route
+back to /remediation for fixes.

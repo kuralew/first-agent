@@ -27,5 +27,20 @@
 - Apply to the correct selector — check whether the project uses a global CSS file, Tailwind config, or inline styles and apply the fix in the appropriate place
 
 ## Hyperlinks Display Violation
-- Identify Hyperlinks in a body of div, span, p, CTA (CAll To Action) links such as sub header or View More links etc.
-- If Hyperlink is in a body, it should be in #000042 and underlined. Otherwise, if it's a CTA Link, should be decorated when hover and color changed to #0018F2
+- Identify Hyperlinks in a body of div, span, p, CTA (Call To Action) links such as sub header or View More links etc.
+- If Hyperlink is in a body, it should be in #000042 and underlined. Otherwise, if it's a CTA Link, should be decorated when hover and color changed to #0018F2. Use inline styles for now to fix.
+
+## Unit Test Coverage Violation
+- If any component lacked a unit test, add a test coverage
+ - [componentName].test.tsx
+ - Use React Testing Library and Jest library for writing tests
+ - For simple function mocks use jest.fn()
+ - For module-level API client mocks use jest.mock()
+ - Each test file must cover the following at minimum:
+  
+  - Check if a component renders without crashing
+  - For any dom element in the component
+   - Test click event if it's a button
+   - Test text input if it's an input element
+   - If it's a presentation component, pass appropriate props and check if contents are displayed
+

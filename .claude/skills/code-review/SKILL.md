@@ -16,6 +16,7 @@ Read @../team-standards/SKILL.md for the full list of team overrides.
 
 ## Tests
 - Make sure each component has a test file associated with it that tests each functionality of a component. If it's API Container component, make sure data is mocked and API call is simulated.
+- Each component must have a test file [componentName].test.tsx that covers rendering, user interactions, and prop-based display as defined in remediation-logic.md
 
 ## Review Process
 - Run `git diff origin/main...HEAD` to get the current diff

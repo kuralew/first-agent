@@ -1,699 +1,18 @@
-import { useState, useRef, useEffect, useCallback, memo } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import type { DisplayMessage, Citation, DocInfo, ExtractedFacts, DocumentDraft, DocumentRisks, RiskLevel, LegalContext, QualityResult, CaseListItem, SavedCase, DraftReview, ClarificationRequest, CaseMemory, ConversationTurn } from "./types.ts";
+import { useState, useRef, useEffect, useCallback } from "react";
+import type { DisplayMessage, Citation, DocInfo, CaseListItem, SavedCase, CaseMemory, ConversationTurn } from "./types.ts";
 import { extractPdfText } from "./adapters/pdfExtract.ts";
 import { generatePdfReport } from "./adapters/pdfReport.tsx";
 import type { ReportData } from "./adapters/pdfReport.tsx";
-import { PdfViewerPane, citationToHighlight } from "./adapters/pdfViewer.tsx";
+import { citationToHighlight } from "./adapters/pdfViewer.tsx";
 import type { IHighlight } from "./adapters/pdfViewer.tsx";
-import { parseSingleTag } from "./utils/citations.ts";
 import { useStreamProcessor } from "./hooks/useStreamProcessor.ts";
 
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function MlexAvatar() {
-  return (
-    <div className="avatar">
-      <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="20" cy="20" r="20" fill="#1B3A6B" />
-        <text x="20" y="25" textAnchor="middle" fill="white" fontSize="13" fontWeight="700" fontFamily="Inter, system-ui, sans-serif">ML</text>
-      </svg>
-    </div>
-  );
-}
-
-function SendIcon({ disabled }: { disabled: boolean }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="send-icon">
-      <circle cx="12" cy="12" r="12" fill={disabled ? "#D1CBC4" : "#1B3A6B"} />
-      <path d="M12 17V8M8 12L12 8L16 12" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-/** Renders assistant text with markdown formatting and inline citation buttons. */
-function AssistantText({
-  text,
-  citations,
-  onCitationClick,
-  streaming,
-  toolRunning,
-  isLast,
-}: {
-  text: string;
-  citations: Citation[];
-  onCitationClick: (c: Citation) => void;
-  streaming: boolean;
-  toolRunning: string | null;
-  isLast: boolean;
-}) {
-  const renderInline = (str: string) => {
-    const parts = str.split(/(\[\d+\])/g);
-    return parts.map((part, i) => {
-      const match = part.match(/^\[(\d+)\]$/);
-      if (match) {
-        const id = +match[1];
-        const citation = citations.find((c) => c.id === id);
-        if (citation) {
-          return (
-            <button
-              key={i}
-              className="citation-btn"
-              onClick={() => onCitationClick(citation)}
-              title={`Jump to source — Doc ${citation.docId}, page ${citation.page}`}
-            >
-              {id}
-            </button>
-          );
-        }
-      }
-      return <span key={i}>{part}</span>;
-    });
-  };
-
-  const injectCitations = (children: React.ReactNode): React.ReactNode => {
-    if (Array.isArray(children)) {
-      return children.flatMap((child) =>
-        typeof child === "string" ? renderInline(child) : [child]
-      );
-    }
-    if (typeof children === "string") return renderInline(children);
-    return children;
-  };
-
-  return (
-    <div className="assistant-text">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          p: ({ children }) => <p>{injectCitations(children)}</p>,
-          li: ({ children }) => <li>{injectCitations(children)}</li>,
-          td: ({ children }) => <td>{injectCitations(children)}</td>,
-          th: ({ children }) => <th>{injectCitations(children)}</th>,
-          h1: ({ children }) => <h1>{injectCitations(children)}</h1>,
-          h2: ({ children }) => <h2>{injectCitations(children)}</h2>,
-          h3: ({ children }) => <h3>{injectCitations(children)}</h3>,
-          hr: () => null,
-        }}
-      >
-        {text}
-      </ReactMarkdown>
-      {streaming && isLast && !toolRunning && text && <span className="cursor" />}
-      {streaming && isLast && (toolRunning || !text) && (
-        <span className="thinking-label">
-          <svg className="thinking-icon" viewBox="0 0 20 20" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="10" cy="10" r="8.2" stroke="currentColor" strokeWidth="1.3" strokeDasharray="3.5 2" />
-            <circle cx="10" cy="3.2" r="1.6" fill="currentColor" />
-            <circle cx="15.7" cy="13.1" r="1.6" fill="currentColor" />
-            <circle cx="4.3" cy="13.1" r="1.6" fill="currentColor" />
-          </svg>
-          {toolRunning ? (({
-            extract_key_facts:     "Extracting facts",
-            draft_document:        "Drafting document",
-            flag_risks:            "Flagging risks",
-            search_legal:          "Searching legal precedents",
-            save_legal_context:    "Saving legal context",
-            assess_quality:        "Reviewing quality",
-            request_clarification: "Requesting clarification",
-          } as Record<string, string>)[toolRunning] ?? "Working") : "Thinking"}
-          <span className="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** Renders extracted key facts as a structured, exportable card. */
-const FactsCard = memo(function FactsCard({
-  facts,
-  onCitationClick,
-}: {
-  facts: ExtractedFacts;
-  onCitationClick: (c: Citation) => void;
-}) {
-  function CitationButton({ tag, id }: { tag?: string; id: number }) {
-    const c = parseSingleTag(tag, id);
-    if (!c) return null;
-    return (
-      <button
-        className="citation-btn"
-        onClick={() => onCitationClick(c)}
-        title={`Jump to source — Doc ${c.docId}, page ${c.page}`}
-      >
-        ↗
-      </button>
-    );
-  }
-
-  const renderInlineText = (text: string | undefined) => {
-    const parts = (text ?? "").split(/(\[d\d+·[^\]]+\])/g);
-    return parts.map((part, i) => {
-      if (/^\[d\d+·/.test(part)) {
-        const c = parseSingleTag(part, citationCounter++);
-        if (c) return <button key={i} className="citation-btn" onClick={() => onCitationClick(c)} title={`Jump to source — Doc ${c.docId}, page ${c.page}`}>↗</button>;
-      }
-      return <span key={i}>{part}</span>;
-    });
-  };
-
-  const byCategory = facts.facts.reduce<Record<string, typeof facts.facts>>((acc, f) => {
-    (acc[f.category] = acc[f.category] ?? []).push(f);
-    return acc;
-  }, {});
-
-  function exportJson() {
-    const blob = new Blob([JSON.stringify(facts, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "extracted-facts.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  let citationCounter = 5000;
-
-  return (
-    <div className="facts-card">
-      <div className="facts-card-header">
-        <div className="facts-card-title">
-          <span className="facts-card-icon">⬡</span>
-          <span>Extracted Facts</span>
-          <span className="facts-card-doctype">{facts.document_type}</span>
-        </div>
-        <button className="facts-export-btn" onClick={exportJson} title="Export as JSON">
-          Export JSON
-        </button>
-      </div>
-
-      {facts.parties.length > 0 && (
-        <div className="facts-section">
-          <div className="facts-section-label">Parties</div>
-          <table className="facts-table">
-            <tbody>
-              {facts.parties.map((p, i) => (
-                <tr key={i}>
-                  <td className="facts-role">{p.role}</td>
-                  <td className="facts-name">
-                    {p.name}
-                    <CitationButton tag={p.citation} id={citationCounter++} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {Object.entries(byCategory).map(([category, items]) => (
-        <div className="facts-section" key={category}>
-          <div className="facts-section-label">{category}</div>
-          <ul className="facts-list">
-            {items.map((f, i) => (
-              <li key={i}>
-                {renderInlineText(f.item)}
-                <CitationButton tag={f.citation} id={citationCounter++} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-
-      {facts.key_dates && facts.key_dates.length > 0 && (
-        <div className="facts-section">
-          <div className="facts-section-label">Key Dates</div>
-          <ul className="facts-list">
-            {facts.key_dates.map((d, i) => (
-              <li key={i}>
-                <span className="facts-date">{d.date}</span>
-                <span className="facts-date-desc">{renderInlineText(d.description)}</span>
-                <CitationButton tag={d.citation} id={citationCounter++} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {facts.amounts && facts.amounts.length > 0 && (
-        <div className="facts-section">
-          <div className="facts-section-label">Amounts</div>
-          <ul className="facts-list">
-            {facts.amounts.map((a, i) => (
-              <li key={i}>
-                <span className="facts-amount">{a.amount}</span>
-                <span className="facts-date-desc">{renderInlineText(a.description)}</span>
-                <CitationButton tag={a.citation} id={citationCounter++} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-});
-
-/** Renders a drafted document with markdown preview, .docx download, and approve/reject review. */
-const DraftCard = memo(function DraftCard({
-  draft,
-  review,
-  onApprove,
-  onReject,
-}: {
-  draft: DocumentDraft;
-  review?: DraftReview;
-  onApprove?: () => void;
-  onReject?: (comment: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(true);
-  const [rejecting, setRejecting] = useState(false);
-  const [rejectComment, setRejectComment] = useState("");
-
-  async function downloadDocx() {
-    const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import("docx");
-
-    const children: InstanceType<typeof Paragraph>[] = [];
-    children.push(new Paragraph({ text: draft.title, heading: HeadingLevel.TITLE }));
-
-    for (const line of draft.content.split("\n")) {
-      if (line.startsWith("## ")) {
-        children.push(new Paragraph({ text: line.slice(3), heading: HeadingLevel.HEADING_2 }));
-      } else if (line.startsWith("# ")) {
-        children.push(new Paragraph({ text: line.slice(2), heading: HeadingLevel.HEADING_1 }));
-      } else if (line.startsWith("- ") || line.startsWith("* ")) {
-        children.push(new Paragraph({ text: line.slice(2), bullet: { level: 0 } }));
-      } else if (line.trim() === "") {
-        children.push(new Paragraph({ text: "" }));
-      } else {
-        const parts = line.split(/(\*\*[^*]+\*\*)/g);
-        const runs = parts.map((p) => {
-          if (p.startsWith("**") && p.endsWith("**")) {
-            return new TextRun({ text: p.slice(2, -2), bold: true });
-          }
-          return new TextRun({ text: p });
-        });
-        children.push(new Paragraph({ children: runs }));
-      }
-    }
-
-    const doc = new Document({ sections: [{ children }] });
-    const blob = await Packer.toBlob(doc);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${draft.title.replace(/[^a-z0-9]/gi, "-").toLowerCase()}.docx`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function submitReject() {
-    if (!rejectComment.trim()) return;
-    onReject?.(rejectComment.trim());
-    setRejecting(false);
-    setRejectComment("");
-  }
-
-  const reviewed = review && review.status !== "pending";
-
-  return (
-    <div className={`draft-card${reviewed ? ` draft-card-${review!.status}` : ""}`}>
-      <div className="draft-card-header">
-        <div className="draft-card-title">
-          <span className="draft-card-icon">✦</span>
-          <span className="draft-card-type">{draft.draft_type}</span>
-          <span className="draft-card-name">{draft.title}</span>
-          {review?.status === "approved" && (
-            <span className="draft-review-badge draft-review-badge-approved">✓ Approved</span>
-          )}
-          {review?.status === "rejected" && (
-            <span className="draft-review-badge draft-review-badge-rejected">↩ Revision Requested</span>
-          )}
-        </div>
-        <div className="draft-card-actions">
-          <button className="draft-download-btn" onClick={downloadDocx} title="Download as .docx">
-            Download .docx
-          </button>
-          <button
-            className="draft-toggle-btn"
-            onClick={() => setExpanded((e) => !e)}
-            aria-label={expanded ? "Collapse" : "Expand"}
-          >
-            {expanded ? "▲" : "▼"}
-          </button>
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="draft-body">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.content}</ReactMarkdown>
-        </div>
-      )}
-
-      {!reviewed && onApprove && onReject && (
-        <div className="draft-review-bar">
-          {!rejecting ? (
-            <>
-              <button className="draft-approve-btn" onClick={onApprove}>
-                ✓ Approve
-              </button>
-              <button className="draft-reject-btn" onClick={() => setRejecting(true)}>
-                ↩ Request Revision
-              </button>
-            </>
-          ) : (
-            <div className="draft-reject-form">
-              <textarea
-                className="draft-reject-textarea"
-                placeholder="Describe what needs to change…"
-                value={rejectComment}
-                onChange={(e) => setRejectComment(e.target.value)}
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitReject();
-                  if (e.key === "Escape") { setRejecting(false); setRejectComment(""); }
-                }}
-              />
-              <div className="draft-reject-actions">
-                <button
-                  className="draft-reject-submit-btn"
-                  onClick={submitReject}
-                  disabled={!rejectComment.trim()}
-                >
-                  Send Feedback
-                </button>
-                <button
-                  className="draft-reject-cancel-btn"
-                  onClick={() => { setRejecting(false); setRejectComment(""); }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {review?.status === "rejected" && review.comment && (
-        <div className="draft-review-comment">
-          <span className="draft-review-comment-label">Feedback sent:</span>
-          {review.comment}
-        </div>
-      )}
-    </div>
-  );
-});
-
-/** Renders the flagged risks card. */
-const RisksCard = memo(function RisksCard({
-  risks,
-  onCitationClick,
-}: {
-  risks: DocumentRisks;
-  onCitationClick: (c: Citation) => void;
-}) {
-  const LEVEL_COLOR: Record<RiskLevel, string> = {
-    LOW: "#2E7D32",
-    MEDIUM: "#E65100",
-    HIGH: "#B71C1C",
-    CRITICAL: "#6A0000",
-  };
-
-  function CitationButton({ tag, id }: { tag?: string; id: number }) {
-    const c = parseSingleTag(tag, id);
-    if (!c) return null;
-    return (
-      <button
-        className="citation-btn"
-        onClick={() => onCitationClick(c)}
-        title={`Jump to source — Doc ${c.docId}, page ${c.page}`}
-      >
-        ↗
-      </button>
-    );
-  }
-
-  const renderInlineText = (text: string | undefined) => {
-    const parts = (text ?? "").split(/(\[d\d+·[^\]]+\])/g);
-    return parts.map((part, i) => {
-      if (/^\[d\d+·/.test(part)) {
-        const c = parseSingleTag(part, citationCounter++);
-        if (c) return <button key={i} className="citation-btn" onClick={() => onCitationClick(c)} title={`Jump to source — Doc ${c.docId}, page ${c.page}`}>↗</button>;
-      }
-      return <span key={i}>{part}</span>;
-    });
-  };
-
-  let citationCounter = 9000;
-
-  return (
-    <div className="risks-card">
-      <div className="risks-card-header">
-        <div className="risks-card-title">
-          <span className="risks-card-icon">⚠</span>
-          <span>Risk Assessment</span>
-          <span
-            className="risks-overall-badge"
-            style={{ background: LEVEL_COLOR[risks.overall_risk_level] }}
-          >
-            {risks.overall_risk_level}
-          </span>
-        </div>
-      </div>
-
-      <p className="risks-summary">{risks.summary}</p>
-
-      <div className="risks-list">
-        {risks.risks.map((r, i) => (
-          <div key={i} className="risk-item" data-severity={r.severity}>
-            <div className="risk-item-header">
-              <span
-                className="risk-severity"
-                style={{ color: LEVEL_COLOR[r.severity] }}
-              >
-                {r.severity}
-              </span>
-              <span className="risk-category">{r.category}</span>
-              <CitationButton tag={r.citation} id={citationCounter++} />
-            </div>
-            <p className="risk-description">{renderInlineText(r.description)}</p>
-            <p className="risk-recommendation">
-              <span className="risk-rec-label">Recommendation: </span>
-              {renderInlineText(r.recommendation)}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-});
-
-/** Renders legal research findings as a clearly-labeled external research card. */
-const LegalContextCard = memo(function LegalContextCard({ context }: { context: LegalContext }) {
-  const [expanded, setExpanded] = useState(true);
-
-  return (
-    <div className="legal-card">
-      <div className="legal-card-header">
-        <div className="legal-card-title">
-          <span className="legal-card-icon">⚖</span>
-          <span>External Research</span>
-          <span className="legal-card-badge">Supplemental — not document-grounded</span>
-        </div>
-        <button
-          className="legal-card-toggle"
-          onClick={() => setExpanded((e) => !e)}
-          aria-label={expanded ? "Collapse" : "Expand"}
-        >
-          {expanded ? "▲" : "▼"}
-        </button>
-      </div>
-
-      {expanded && (
-        <>
-          <p className="legal-card-summary">{context.summary}</p>
-          <div className="legal-findings">
-            {context.findings.map((f, i) => (
-              <div key={i} className="legal-finding">
-                <div className="legal-finding-context">{f.claim_context}</div>
-                <div className="legal-finding-research">{f.research}</div>
-                <div className="legal-finding-implication">{f.implication}</div>
-                {f.sources && f.sources.length > 0 && (
-                  <div className="legal-finding-sources">
-                    {f.sources.map((src, j) => (
-                      <a key={j} href={src} target="_blank" rel="noopener noreferrer" className="legal-source-link">
-                        {j + 1}. {src.replace(/^https?:\/\//, "").split("/")[0]}
-                      </a>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-});
-
-/** Renders a clarification request with an inline answer input. */
-const ClarificationCard = memo(function ClarificationCard({
-  clarification,
-  onAnswer,
-}: {
-  clarification: ClarificationRequest;
-  onAnswer: (answer: string) => void;
-}) {
-  const [answer, setAnswer] = useState(clarification.answer ?? "");
-  const answered = !!clarification.answer;
-
-  function submit() {
-    const trimmed = answer.trim();
-    if (!trimmed || answered) return;
-    onAnswer(trimmed);
-  }
-
-  return (
-    <div className="clarification-card">
-      <div className="clarification-header">
-        <span className="clarification-icon">?</span>
-        <span className="clarification-label">Clarification needed</span>
-      </div>
-      <div className="clarification-question">{clarification.question}</div>
-      {clarification.reason && (
-        <div className="clarification-reason">{clarification.reason}</div>
-      )}
-      {answered ? (
-        <div className="clarification-answered">
-          <span className="clarification-answered-label">Your answer:</span>
-          {clarification.answer}
-        </div>
-      ) : (
-        <div className="clarification-input-row">
-          <input
-            className="clarification-input"
-            type="text"
-            placeholder="Type your answer…"
-            value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-            autoFocus
-          />
-          <button
-            className="clarification-submit-btn"
-            onClick={submit}
-            disabled={!answer.trim()}
-          >
-            Submit
-          </button>
-        </div>
-      )}
-    </div>
-  );
-});
-
-// ── Quality result card ───────────────────────────────────────────────────────
-
-function QualityCard({ result }: { result: QualityResult }) {
-  const checks: Array<{ label: string; ok: boolean }> = [
-    { label: "Facts & citations",  ok: result.facts_adequate },
-    { label: "Draft completeness", ok: result.draft_adequate },
-    { label: "Risk citations",     ok: result.risks_adequate },
-    { label: "Legal research",     ok: result.research_adequate },
-  ];
-  return (
-    <div className={`quality-card ${result.overall_ready ? "quality-card--pass" : "quality-card--fail"}`}>
-      <div className="quality-card-header">
-        <span className="quality-card-icon">{result.overall_ready ? "✓" : "✗"}</span>
-        <span className="quality-card-title">{result.overall_ready ? "Quality gate passed" : "Quality gaps found"}</span>
-      </div>
-      <div className="quality-checks">
-        {checks.map((c) => (
-          <span key={c.label} className={`quality-check ${c.ok ? "quality-check--ok" : "quality-check--fail"}`}>
-            {c.ok ? "✓" : "✗"} {c.label}
-          </span>
-        ))}
-      </div>
-      {result.gaps.length > 0 && (
-        <ul className="quality-gaps">
-          {result.gaps.map((g, i) => <li key={i}>{g}</li>)}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-// ── Case sidebar ──────────────────────────────────────────────────────────────
-
-function formatRelativeDate(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  if (diff < 604_800_000) return `${Math.floor(diff / 86_400_000)}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
-function CaseSidebar({
-  cases,
-  activeCaseId,
-  caseName,
-  onLoad,
-  onDelete,
-  onNew,
-  onRename,
-}: {
-  cases: CaseListItem[];
-  activeCaseId: string | null;
-  caseName: string;
-  onLoad: (id: string) => void;
-  onDelete: (id: string, e: React.MouseEvent) => void;
-  onNew: () => void;
-  onRename: (name: string) => void;
-}) {
-  return (
-    <div className="case-sidebar">
-      <div className="case-sidebar-header">
-        <span className="case-sidebar-title">Cases</span>
-        <button className="case-new-btn" onClick={onNew} title="New case">＋</button>
-      </div>
-
-      {activeCaseId && (
-        <div className="case-active-name">
-          <input
-            className="case-name-input"
-            value={caseName}
-            onChange={(e) => onRename(e.target.value)}
-            placeholder="Name this case…"
-          />
-        </div>
-      )}
-
-      <div className="case-list">
-        {cases.length === 0 ? (
-          <div className="case-empty">No saved cases yet</div>
-        ) : (
-          cases.map((c) => (
-            <div
-              key={c.id}
-              className={`case-item${c.id === activeCaseId ? " case-item-active" : ""}`}
-              onClick={() => onLoad(c.id)}
-            >
-              <div className="case-item-name">{c.name}</div>
-              <div className="case-item-meta">{formatRelativeDate(c.updatedAt)}</div>
-              <button
-                className="case-delete-btn"
-                onClick={(e) => onDelete(c.id, e)}
-                title="Delete case"
-              >×</button>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Main App ──────────────────────────────────────────────────────────────────
+import { CaseSidebar } from "./components/sidebar/CaseSidebar.tsx";
+import { AppHeader } from "./components/layout/AppHeader.tsx";
+import { IntakeNotification } from "./components/layout/IntakeNotification.tsx";
+import { PreviewPane } from "./components/layout/PreviewPane.tsx";
+import { MessageList } from "./components/chat/MessageList.tsx";
+import { ChatInput } from "./components/input/ChatInput.tsx";
 
 export default function App() {
   const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
@@ -718,6 +37,7 @@ export default function App() {
 
   const [intakeNotification, setIntakeNotification] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -904,8 +224,6 @@ export default function App() {
     e.target.value = "";
   }
 
-  const [dragOver, setDragOver] = useState(false);
-
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(true);
@@ -920,7 +238,6 @@ export default function App() {
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files).filter((f) => f.type === "application/pdf");
     if (!files.length) return;
-    // Immediately run intake analysis on dropped files.
     files.forEach((file) => intakeAnalyzeFileRef.current?.(file));
   }
 
@@ -942,6 +259,11 @@ export default function App() {
     } else {
       setActiveCitation(citation);
     }
+  }
+
+  function handleViewDoc(doc: DocInfo) {
+    setActiveCitation(null);
+    setPreviewPdf({ url: doc.url, name: doc.name });
   }
 
   async function fetchCases() {
@@ -1142,14 +464,12 @@ export default function App() {
       setLoading(false);
       setStreaming(false);
       setToolRunning(null);
-      // Process any queued intake events that arrived while busy.
       const next = intakeQueueRef.current.shift();
       if (next) intakeAnalyzeRef.current?.(next.filename, next.url);
     }
   }
   intakeAnalyzeRef.current = intakeAnalyze;
 
-  // Takes a File object directly (browser drag-and-drop) — no server fetch needed.
   async function intakeAnalyzeFile(file: File) {
     if (loading) {
       intakeQueueRef.current.push({ filename: file.name, url: URL.createObjectURL(file) });
@@ -1390,9 +710,6 @@ export default function App() {
     }
   }
 
-  const isEmpty = displayMessages.length === 0 && !loading;
-  const canSend = !loading && (!!input.trim() || pendingDocs.length > 0);
-
   const handleScrollRef = useCallback((scrollTo: (h: IHighlight) => void) => {
     scrollToRef.current = scrollTo;
   }, []);
@@ -1408,277 +725,62 @@ export default function App() {
         onNew={startNewCase}
         onRename={(name) => { setCaseName(name); caseNameRef.current = name; }}
       />
-      {/* ── Chat pane ── */}
+
       <div className="app">
-        <header className="header">
-          <div className="header-inner">
-            <button
-              className="sidebar-toggle"
-              onClick={() => setSidebarOpen((o) => !o)}
-              title={sidebarOpen ? "Hide cases" : "Show cases"}
-            >
-              <svg viewBox="0 0 18 14" fill="none" width="18" height="14">
-                <rect y="0" width="18" height="2" rx="1" fill="currentColor" />
-                <rect y="6" width="12" height="2" rx="1" fill="currentColor" />
-                <rect y="12" width="18" height="2" rx="1" fill="currentColor" />
-              </svg>
-            </button>
-            <span className="header-logo">
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="22" height="22">
-                <circle cx="12" cy="12" r="12" fill="#1B3A6B" />
-                <text x="12" y="16" textAnchor="middle" fill="white" fontSize="7.5" fontWeight="700" fontFamily="Inter, system-ui, sans-serif">ML</text>
-              </svg>
-            </span>
-            <span className="header-title">MLex</span>
-            <span className="header-model">McDermott Will &amp; Schulte</span>
-          </div>
-          {reportData && (
-            <button
-              className="export-report-btn"
-              onClick={exportReport}
-              disabled={exporting}
-              title="Export full analysis as PDF"
-            >
-              {exporting ? "Generating…" : "Export Report"}
-            </button>
-          )}
-        </header>
+        <AppHeader
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen((o) => !o)}
+          reportData={reportData}
+          exporting={exporting}
+          onExportReport={exportReport}
+        />
 
         {intakeNotification && (
-          <div className="intake-notification">
-            <span className="intake-notification-icon">⚡</span>
-            <span>Auto-analyzing: <strong>{intakeNotification}</strong></span>
-            <button className="intake-notification-close" onClick={() => setIntakeNotification(null)}>×</button>
-          </div>
+          <IntakeNotification
+            filename={intakeNotification}
+            onClose={() => setIntakeNotification(null)}
+          />
         )}
 
-        <div className="messages">
-          {isEmpty && (
-            <div className="empty-state">
-              <div className="empty-logo">
-                <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="40" cy="40" r="40" fill="#E8EDF5" />
-                  <text x="40" y="50" textAnchor="middle" fill="#1B3A6B" fontSize="22" fontWeight="700" fontFamily="Inter, system-ui, sans-serif">ML</text>
-                </svg>
-              </div>
-              <h2>How can I help you today?</h2>
-              <p className="empty-subtitle">Your AI legal assistant by McDermott Will &amp; Schulte</p>
-            </div>
-          )}
+        <MessageList
+          displayMessages={displayMessages}
+          loading={loading}
+          streaming={streaming}
+          bottomRef={bottomRef}
+          onCitationClick={handleCitationClick}
+          onApproveDraft={approveDraft}
+          onRejectDraft={rejectDraft}
+          onAnswerClarification={answerClarification}
+          onViewDoc={handleViewDoc}
+        />
 
-          {displayMessages.map((msg, i) => (
-            <div key={i} className={`message-row message-row-${msg.role}`}>
-              {msg.role === "assistant" && <MlexAvatar />}
-              <div className={`message-content message-content-${msg.role}`}>
-                {msg.role === "assistant" ? (
-                  <>
-                    {msg.agentLabel && (
-                      <div className="agent-label">{msg.agentLabel}</div>
-                    )}
-                    {msg.toolLogs && msg.toolLogs.length > 0 && (
-                      <details className="tool-logs">
-                        <summary>
-                          <span className="tool-logs-icon">⚙</span>
-                          Used {msg.toolLogs.length} tool{msg.toolLogs.length !== 1 ? "s" : ""}
-                        </summary>
-                        <div className="tool-logs-body">
-                          {msg.toolLogs.map((log, j) => (
-                            <div key={j} className="tool-log">
-                              <div className="tool-log-header">
-                                <span className="tool-name">{log.name}</span>
-                              </div>
-                              <pre className="tool-input">{JSON.stringify(log.input, null, 2)}</pre>
-                              <pre className="tool-result">{log.result}</pre>
-                            </div>
-                          ))}
-                        </div>
-                      </details>
-                    )}
-                    {msg.extractedFacts && (
-                      <FactsCard
-                        facts={msg.extractedFacts}
-                        onCitationClick={handleCitationClick}
-                      />
-                    )}
-                    {msg.draft && (
-                      <DraftCard
-                        draft={msg.draft}
-                        review={msg.draftReview}
-                        onApprove={() => approveDraft(i)}
-                        onReject={(comment) => rejectDraft(i, comment)}
-                      />
-                    )}
-                    {msg.risks && (
-                      <RisksCard
-                        risks={msg.risks}
-                        onCitationClick={handleCitationClick}
-                      />
-                    )}
-                    {msg.legalContext && (
-                      <LegalContextCard context={msg.legalContext} />
-                    )}
-                    {msg.qualityResult && (
-                      <QualityCard result={msg.qualityResult} />
-                    )}
-                    {msg.clarification && (
-                      <ClarificationCard
-                        clarification={msg.clarification}
-                        onAnswer={(answer) => answerClarification(i, answer)}
-                      />
-                    )}
-                    <AssistantText
-                      text={msg.text}
-                      citations={msg.citations ?? []}
-                      onCitationClick={handleCitationClick}
-                      streaming={streaming}
-                      toolRunning={msg.toolRunning ?? null}
-                      isLast={i === displayMessages.length - 1 || !!msg.toolRunning}
-                    />
-                  </>
-                ) : (
-                  <div className="user-message-stack">
-                    {msg.isIntake && (
-                      <div className="intake-badge">⚡ Auto-analyzed from inbox</div>
-                    )}
-                    {msg.docs?.map((doc) => (
-                      <div key={doc.id} className="user-attachment-card">
-                        <div className="user-attachment-icon">
-                          <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                            <polyline points="14 2 14 8 20 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                            <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-                            <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-                          </svg>
-                        </div>
-                        <div className="user-attachment-info">
-                          <span className="user-attachment-name">{doc.name}</span>
-                          <span className="user-attachment-meta">PDF Document</span>
-                        </div>
-                        {doc.url && (
-                          <button
-                            className="user-attachment-view"
-                            onClick={() => {
-                              setActiveCitation(null);
-                              setPreviewPdf({ url: doc.url, name: doc.name });
-                            }}
-                          >
-                            View
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    {msg.text &&
-                      msg.text !== `Analyze: ${msg.docs?.map((d) => d.name).join(", ")}` && (
-                        <div className="user-bubble-text">{msg.text}</div>
-                      )}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {loading && (
-            <div className="message-row message-row-assistant">
-              <MlexAvatar />
-              <div className="message-content message-content-assistant">
-                <div className="typing">
-                  <span className="dot" />
-                  <span className="dot" />
-                  <span className="dot" />
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div ref={bottomRef} />
-        </div>
-
-        <div className="input-wrap">
-          {pendingDocs.length > 0 && (
-            <div className="pdf-chips">
-              {pendingDocs.map((doc, i) => (
-                <div key={i} className="pdf-chip">
-                  <span className="pdf-chip-icon">📄</span>
-                  <span className="pdf-chip-name">{doc.name}</span>
-                  <button
-                    className="pdf-chip-remove"
-                    onClick={() => removePendingDoc(i)}
-                    aria-label="Remove"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          <div
-            className={`input-card${dragOver ? " drag-over" : ""}`}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              multiple
-              style={{ display: "none" }}
-              onChange={handleFileChange}
-            />
-            <button
-              className="attach-btn"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={loading}
-              aria-label="Attach PDF"
-              title="Attach PDF"
-            >
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                pendingDocs.length > 0
-                  ? `Ask about ${pendingDocs.map((d) => d.name).join(", ")}...`
-                  : "Message MLex..."
-              }
-              rows={1}
-              disabled={loading}
-            />
-            <button className="send-btn" onClick={send} disabled={!canSend} aria-label="Send">
-              <SendIcon disabled={!canSend} />
-            </button>
-          </div>
-          <p className="input-hint">Enter to send &middot; Shift+Enter for newline</p>
-        </div>
+        <ChatInput
+          input={input}
+          onInputChange={setInput}
+          loading={loading}
+          pendingDocs={pendingDocs}
+          onRemovePendingDoc={removePendingDoc}
+          fileInputRef={fileInputRef}
+          textareaRef={textareaRef}
+          onSend={send}
+          onFileChange={handleFileChange}
+          onKeyDown={handleKeyDown}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          dragOver={dragOver}
+        />
       </div>
 
-      {/* ── Preview pane ── */}
       {previewPdf && (
-        <div className="preview-pane" ref={previewPaneRef}>
-          <div className="preview-header">
-            <span className="preview-title">📄 {previewPdf.name}</span>
-            <button
-              className="preview-close"
-              onClick={() => { setPreviewPdf(null); setActiveCitation(null); }}
-              aria-label="Close preview"
-            >
-              ×
-            </button>
-          </div>
-          <div className="preview-body">
-            <PdfViewerPane
-              url={previewPdf.url}
-              highlights={highlights}
-              activeCitationId={activeCitation ? String(activeCitation.id) : null}
-              onScrollRef={handleScrollRef}
-            />
-          </div>
-        </div>
+        <PreviewPane
+          pdf={previewPdf}
+          highlights={highlights}
+          activeCitationId={activeCitation ? String(activeCitation.id) : null}
+          paneRef={previewPaneRef}
+          onScrollRef={handleScrollRef}
+          onClose={() => { setPreviewPdf(null); setActiveCitation(null); }}
+        />
       )}
     </div>
   );
