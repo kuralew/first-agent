@@ -33,9 +33,12 @@
 ## Unit Test Coverage Violation
 - If any component lacked a unit test, add a test coverage
  - [componentName].test.tsx
- - Use React Testing Library and Jest library for writing tests
- - For simple function mocks use jest.fn()
- - For module-level API client mocks use jest.mock()
+ - Use React Testing Library and vitest library for writing tests
+ - Import test utilities as: `import { describe, it, expect, vi } from 'vitest'`
+ - Import rendering utilities as: `import { render, screen, fireEvent } from '@testing-library/react'`
+ - Use `@testing-library/jest-dom` matchers where appropriate (e.g. `toBeInTheDocument()`, `toHaveTextContent()`)
+ - For simple function mocks use vi.fn()
+ - For module-level API client mocks use vi.mock()
  - Each test file must cover the following at minimum:
   
   - Check if a component renders without crashing
