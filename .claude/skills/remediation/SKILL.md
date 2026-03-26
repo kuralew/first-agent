@@ -5,11 +5,12 @@ version: "0.1"
 ---
 
 ## Fix Logic
-- Read @remediation-logic.md to understand how to fix each category of issue.
 - Apply the appropriate fix based on the issue type in $ARGUMENTS.
 - If $ARGUMENTS includes code context (line, componentName, file), it's reported by /code-review or /security-review and then auto fix
 - If $ARGUMENTS is a raw description of an error, it's from an external pipeline. Get context from appropriate file in the repository and fix it. If there is not enough context, ask the developer for more information. 
 - Always ask the developer for approval before applying any fix, whether internal or external
+- For code quality findings, read @code-review-remediation-logic.md
+- For security findings, read @security-remediation-logic.md
 
 ## Outcome Report
 - Generate a report for each reported issue. 
