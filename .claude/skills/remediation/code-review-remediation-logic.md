@@ -30,6 +30,30 @@
 - Identify Hyperlinks in a body of div, span, p, CTA (Call To Action) links such as sub header or View More links etc.
 - If Hyperlink is in a body, it should be in #000042 and underlined. Otherwise, if it's a CTA Link, should be decorated when hover and color changed to #0018F2. Use inline styles for now to fix.
 
+## Distinguishing Body Links from CTA Links
+
+To determine link type, check two things:
+
+**1. Link text pattern:**
+- If the link text is action-oriented and imperative (View More, Compare, 
+  Download, Get Started, Learn More) → CTA link
+- If the link text is descriptive or embedded in content → body link
+- When context and text pattern conflict, text pattern takes priority
+- Any link with imperative action text (View, Compare, Download, Select, 
+  Add, Create) is always a CTA link regardless of where it sits
+
+**2. Context:**
+- If the link sits inside a paragraph, sentence, or block of text → body link
+- If the link stands alone as a UI element → CTA link
+
+**Body link treatment:**
+- Color: #000042
+- Always underlined (static, not on hover)
+
+**CTA link treatment:**
+- Default color: #000042, no underline
+- On hover: color changes to #0018F2, underline appears
+
 ## Unit Test Coverage Violation
 - If any component lacked a unit test, add a test coverage
  - [componentName].test.tsx
@@ -47,3 +71,5 @@
    - Test text input if it's an input element
    - If it's a presentation component, pass appropriate props and check if contents are displayed
 
+## Performance
+- Wrap expensive calculations in useMemo when they depend on state or props

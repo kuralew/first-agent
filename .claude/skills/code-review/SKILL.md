@@ -16,16 +16,19 @@ Read @../team-standards/SKILL.md for the full list of team overrides.
 
 ## Tests
 - Make sure each component has a test file associated with it that tests each functionality of a component. If it's API Container component, make sure data is mocked and API call is simulated.
-- Each component must have a test file [componentName].test.tsx that covers rendering, user interactions, and prop-based display as defined in remediation-logic.md
+- Each component must have a test file [componentName].test.tsx that covers rendering, user interactions, and prop-based display as defined in @../remediation/code-review-remediation-logic.md
 
 ## Review Process
 - Run `git diff origin/main...HEAD` to get the current diff
 - Review every file in the diff against the standards in this skill
 - Review every file against the team overrides in @../team-standards/SKILL.md
+- If $ARGUMENTS is provided, review the specific file or component passed in rather than the full diff
 
 ## Actions after Review
-- For simple, mechanical issues: apply the fix using @../remediation/remediation-logic.md and ask the user for approval before applying
+- For simple, mechanical issues: apply the fix using @../remediation/code-review-remediation-logic.md and ask the user for approval before applying
 - For complex issues or business logic violations: report the finding with a clear explanation and recommended approach — leave the fix to the developer
+- If a component is missing a test file, generate [componentName].test.tsx 
+  following the testing standards in @../remediation/code-review-remediation-logic.md
 
 ## Outcome Report
 
