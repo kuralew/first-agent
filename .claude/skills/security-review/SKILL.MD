@@ -136,6 +136,53 @@ version: "0.1"
 - Check that internal Azure service URLs are not constructable from 
   user input
 
+## Firm-Specific Security Controls
+### Artifact Proxy Compliance
+- Check that .npmrc does not point directly to https://registry.npmjs.org — 
+  it should point to the firm's internal Azure Artifacts or JFrog proxy
+- Check that NuGet.Config registry source is not pointing directly to 
+  https://api.nuget.org/v3/index.json — it should point to the internal proxy
+- If no .npmrc exists in the repo, flag as MEDIUM — developers may be 
+  pulling directly from the public registry without realizing it
+- If no NuGet.Config exists or it has no custom source defined, flag as 
+  MEDIUM for the same reason
+- Flag as HIGH if any package manager config has been modified in the diff 
+  to bypass the internal proxy and point directly to a public registry
+
+### Dependency Pinning and Lock Files
+- Check that package-lock.json or yarn.lock exists and is committed to 
+  source control for every JavaScript/TypeScript project — flag as MEDIUM 
+  if missing
+- Check that lock files have been updated when package.json has changed 
+  in the same diff — a package.json change without a corresponding lock 
+  file update is a risk
+- Check that .csproj files use exact version pins rather than floating 
+  ranges (e.g. avoid 1.* or >= patterns) — flag as MEDIUM if found
+- Check that lock files are not in .gitignore — they must be committed 
+  to ensure reproducible builds across all developer machines and CI/CD
+
+### Container Security
+> Applies to the .NET API backend only. The React frontend is deployed 
+> as a static build to Azure Static Web Apps and is not containerized.
+
+- Check that Dockerfiles use a specific pinned base image tag rather than 
+  latest (e.g. mcr.microsoft.com/dotnet/aspnet:8.0.1 not 
+  mcr.microsoft.com/dotnet/aspnet:latest) — flag as HIGH since latest 
+  can silently pull in vulnerable versions
+- Check that base images come from trusted sources — official Microsoft 
+  Container Registry (mcr.microsoft.com) or the firm's private Azure 
+  Container Registry — flag as HIGH for unverified third-party base images
+- Check that Dockerfiles do not install packages using apt-get without 
+  pinned versions — flag as MEDIUM
+- Check that no secrets, API keys, or credentials are passed as Docker 
+  build arguments (ARG) or environment variables (ENV) in the Dockerfile 
+  — flag as CRITICAL, propose using Azure Key Vault references at runtime 
+  instead
+- Check that .dockerignore exists and excludes sensitive files such as 
+  .env and appsettings.json — flag as MEDIUM if missing
+- Check that multi-stage builds are used for production images — flag as 
+  LOW if a single-stage build is used for a production Dockerfile
+
 ## Actions After Review
 - For every finding, classify severity as CRITICAL, HIGH, MEDIUM, or LOW
 - For CRITICAL and HIGH: block the commit, apply fix using 
