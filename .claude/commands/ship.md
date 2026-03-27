@@ -18,9 +18,10 @@ Automates the full feature branch shipping workflow. Run this when you're ready 
    - Analyze the diff to write a concise, imperative commit message (1-2 sentences max)
    - Show the message to the user and ask them to confirm or provide their own
 
-5. **Commit**
-   - Commit with the confirmed message, appending:
-     `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>`
+5. **Commit (via /commit)**
+   - Use the /commit skill — it runs /code-review and /security-review automatically
+   - If either review fails, stop and tell the developer to run /remediation first
+   - Do NOT use raw `git commit` — it is blocked by a hook
 
 6. **Push**
    - Run `git push`
